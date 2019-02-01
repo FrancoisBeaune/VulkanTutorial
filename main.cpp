@@ -1,10 +1,12 @@
 
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstring>
 #include <exception>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -58,12 +60,14 @@ class HelloTriangleApplication
     GLFWwindow*                 m_window;
     VkInstance                  m_instance;
     VkDebugUtilsMessengerEXT    m_debug_messenger;
+    VkPhysicalDevice            m_physical_device;
 
     void init_vulkan()
     {
         query_vk_instance_extensions();
         create_vk_instance();
         setup_vk_debug_messenger();
+        pick_vk_physical_device();
     }
 
     void query_vk_instance_extensions() const
@@ -224,6 +228,84 @@ class HelloTriangleApplication
             if (vkCreateDebugUtilsMessengerEXTFn(m_instance, &create_info, nullptr, &m_debug_messenger) != VK_SUCCESS)
                 throw std::runtime_error("Failed to create Vulkan debug messenger");
         }
+    }
+
+    struct QueueFamilyIndices
+    {
+        std::optional<std::uint32_t> m_graphics_family;
+
+        bool is_complete() const
+        {
+            return m_graphics_family.has_value();
+        }
+    };
+
+    QueueFamilyIndices find_vk_queue_families(const VkPhysicalDevice& device) const
+    {
+        QueueFamilyIndices indices;
+
+        std::uint32_t queue_family_count;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, nullptr);
+
+        std::vector<VkQueueFamilyProperties> queue_family_props(queue_family_count);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, queue_family_props.data());
+
+        for (std::size_t i = 0, e = queue_family_props.size(); i < e; ++i)
+        {
+            const VkQueueFamilyProperties& props = queue_family_props[i];
+
+            if (props.queueCount > 0 && props.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+                indices.m_graphics_family = static_cast<std::uint32_t>(i);
+
+            if (indices.is_complete())
+                break;
+        }
+
+        return indices;
+    }
+
+    bool is_vk_device_suitable(const VkPhysicalDevice& device) const
+    {
+        const QueueFamilyIndices indices = find_vk_queue_families(device);
+        return indices.is_complete();
+    }
+
+    void pick_vk_physical_device()
+    {
+        std::cout << "Picking Vulkan physical device..." << std::endl;
+
+        std::uint32_t device_count;
+        if (vkEnumeratePhysicalDevices(m_instance, &device_count, nullptr) != VK_SUCCESS)
+            throw std::runtime_error("Failed to enumerate Vulkan physical devices");
+
+        if (device_count == 0)
+            throw std::runtime_error("Failed to find a GPU with Vulkan support");
+
+        std::vector<VkPhysicalDevice> devices(device_count);
+        EXPECT_VK_SUCCESS(vkEnumeratePhysicalDevices(m_instance, &device_count, devices.data()));
+
+        std::cout << device_count << " device(s) found:" << std::endl;
+
+        for (const VkPhysicalDevice& device : devices)
+        {
+            VkPhysicalDeviceProperties device_props;
+            vkGetPhysicalDeviceProperties(device, &device_props);
+
+            std::cout << "    " << device_props.deviceName << " (driver version: " << make_version_string(device_props.driverVersion) << ")" << std::endl;
+        }
+
+        m_physical_device = VK_NULL_HANDLE;
+        for (const VkPhysicalDevice& device : devices)
+        {
+            if (is_vk_device_suitable(device))
+            {
+                m_physical_device = device;
+                break;
+            }
+        }
+
+        if (m_physical_device == VK_NULL_HANDLE)
+            throw std::runtime_error("Failed to find a suitable Vulkan device");
     }
 
     void create_window()
