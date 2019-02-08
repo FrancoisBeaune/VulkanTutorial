@@ -67,23 +67,25 @@ class HelloTriangleApplication
     }
 
   private:
-    GLFWwindow*                 m_window;
-    VkInstance                  m_instance;
-    VkDebugUtilsMessengerEXT    m_debug_messenger;
-    VkSurfaceKHR                m_surface;
-    VkPhysicalDevice            m_physical_device;
-    VkDevice                    m_device;
-    VkQueue                     m_graphics_queue;
-    VkQueue                     m_present_queue;
-    VkSwapchainKHR              m_swap_chain;
-    VkFormat                    m_swap_chain_surface_format;
-    VkExtent2D                  m_swap_chain_extent;
-    std::vector<VkImage>        m_swap_chain_images;
-    std::vector<VkImageView>    m_swap_chain_image_views;
-    VkRenderPass                m_render_pass;
-    VkPipelineLayout            m_pipeline_layout;
-    VkPipeline                  m_graphics_pipeline;
-    std::vector<VkFramebuffer>  m_swap_chain_framebuffers;
+    GLFWwindow*                     m_window;
+    VkInstance                      m_instance;
+    VkDebugUtilsMessengerEXT        m_debug_messenger;
+    VkSurfaceKHR                    m_surface;
+    VkPhysicalDevice                m_physical_device;
+    VkDevice                        m_device;
+    VkQueue                         m_graphics_queue;
+    VkQueue                         m_present_queue;
+    VkSwapchainKHR                  m_swap_chain;
+    VkFormat                        m_swap_chain_surface_format;
+    VkExtent2D                      m_swap_chain_extent;
+    std::vector<VkImage>            m_swap_chain_images;
+    std::vector<VkImageView>        m_swap_chain_image_views;
+    VkRenderPass                    m_render_pass;
+    VkPipelineLayout                m_pipeline_layout;
+    VkPipeline                      m_graphics_pipeline;
+    std::vector<VkFramebuffer>      m_swap_chain_framebuffers;
+    VkCommandPool                   m_command_pool;
+    std::vector<VkCommandBuffer>    m_command_buffers;
 
     void init_vulkan()
     {
@@ -99,6 +101,8 @@ class HelloTriangleApplication
         create_vk_render_pass();
         create_vk_graphics_pipeline();
         create_vk_framebuffers();
+        create_vk_command_pool();
+        allocate_vk_command_buffers();
     }
 
     static void query_vk_instance_extensions()
@@ -860,6 +864,67 @@ class HelloTriangleApplication
         }
     }
 
+    void create_vk_command_pool()
+    {
+        std::cout << "Creating Vulkan command pool..." << std::endl;
+
+        const QueueFamilyIndices queue_family_indices = find_vk_queue_families(m_physical_device);
+
+        VkCommandPoolCreateInfo pool_create_info = {};
+        pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        pool_create_info.queueFamilyIndex = queue_family_indices.m_graphics_family.value();
+        pool_create_info.flags = 0;
+
+        if (vkCreateCommandPool(m_device, &pool_create_info, nullptr, &m_command_pool) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create Vulkan command pool");
+    }
+
+    void allocate_vk_command_buffers()
+    {
+        std::cout << "Allocating Vulkan command buffers..." << std::endl;
+
+        m_command_buffers.resize(m_swap_chain_framebuffers.size());
+
+        VkCommandBufferAllocateInfo alloc_info = {};
+        alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc_info.commandPool = m_command_pool;
+        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc_info.commandBufferCount = static_cast<std::uint32_t>(m_command_buffers.size());
+
+        if (vkAllocateCommandBuffers(m_device, &alloc_info, m_command_buffers.data()) != VK_SUCCESS)
+            throw std::runtime_error("Failed to allocate Vulkan command buffer");
+
+        for (std::size_t i = 0; i < m_command_buffers.size(); ++i)
+        {
+            VkCommandBufferBeginInfo begin_info = {};
+            begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            begin_info.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+            begin_info.pInheritanceInfo = nullptr;
+
+            if (vkBeginCommandBuffer(m_command_buffers[i], &begin_info) != VK_SUCCESS)
+                throw std::runtime_error("Failed to begin recording Vulkan command buffer");
+
+            const VkClearValue clear_color = { 0.0f, 0.0f, 0.0f, 1.0f };
+
+            VkRenderPassBeginInfo render_pass_begin_info = {};
+            render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            render_pass_begin_info.renderPass = m_render_pass;
+            render_pass_begin_info.framebuffer = m_swap_chain_framebuffers[i];
+            render_pass_begin_info.renderArea.offset = { 0, 0 };
+            render_pass_begin_info.renderArea.extent = m_swap_chain_extent;
+            render_pass_begin_info.clearValueCount = 1;
+            render_pass_begin_info.pClearValues = &clear_color;
+
+            vkCmdBeginRenderPass(m_command_buffers[i], &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdBindPipeline(m_command_buffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphics_pipeline);
+            vkCmdDraw(m_command_buffers[i], 3, 1, 0, 0);
+            vkCmdEndRenderPass(m_command_buffers[i]);
+
+            if (vkEndCommandBuffer(m_command_buffers[i]) != VK_SUCCESS)
+                throw std::runtime_error("Failed to end recording Vulkan command buffer");
+        }
+    }
+
     void create_window()
     {
         std::cout << "Creating window..." << std::endl;
@@ -882,6 +947,8 @@ class HelloTriangleApplication
     void cleanup()
     {
         std::cout << "Cleaning up..." << std::endl;
+
+        vkDestroyCommandPool(m_device, m_command_pool, nullptr);
 
         for (const VkFramebuffer framebuffer : m_swap_chain_framebuffers)
             vkDestroyFramebuffer(m_device, framebuffer, nullptr);
