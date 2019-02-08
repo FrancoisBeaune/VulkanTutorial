@@ -3,4 +3,17 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <Filter Include="shaders">
+      <UniqueIdentifier>{f234b9ea-3cef-4d5e-b021-85cab23b735b}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="shaders\shader.frag">
+      <Filter>shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="shaders\shader.vert">
+      <Filter>shaders</Filter>
+    </CustomBuild>
+  </ItemGroup>
 </Project>
