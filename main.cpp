@@ -86,6 +86,17 @@ class HelloTriangleApplication
     std::vector<VkFramebuffer>      m_swap_chain_framebuffers;
     VkCommandPool                   m_command_pool;
     std::vector<VkCommandBuffer>    m_command_buffers;
+    VkSemaphore                     m_image_available_semaphore;
+    VkSemaphore                     m_render_finished_semaphore;
+
+    void create_window()
+    {
+        std::cout << "Creating window..." << std::endl;
+
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        m_window = glfwCreateWindow(WindowWidth, WindowHeight, "Vulkan Tutorial", nullptr, nullptr);
+    }
 
     void init_vulkan()
     {
@@ -103,6 +114,7 @@ class HelloTriangleApplication
         create_vk_framebuffers();
         create_vk_command_pool();
         allocate_vk_command_buffers();
+        create_vk_semaphores();
     }
 
     static void query_vk_instance_extensions()
@@ -688,12 +700,22 @@ class HelloTriangleApplication
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &color_attachment_ref;
 
+        VkSubpassDependency dependency = {};
+        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+        dependency.dstSubpass = 0;
+        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcAccessMask = 0;
+        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
         VkRenderPassCreateInfo render_pass_create_info = {};
         render_pass_create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         render_pass_create_info.attachmentCount = 1;
         render_pass_create_info.pAttachments = &color_attachment;
         render_pass_create_info.subpassCount = 1;
         render_pass_create_info.pSubpasses = &subpass;
+        render_pass_create_info.dependencyCount = 1;
+        render_pass_create_info.pDependencies = &dependency;
 
         if (vkCreateRenderPass(m_device, &render_pass_create_info, nullptr, &m_render_pass) != VK_SUCCESS)
             throw std::runtime_error("Failed to create Vulkan render pass");
@@ -925,13 +947,16 @@ class HelloTriangleApplication
         }
     }
 
-    void create_window()
+    void create_vk_semaphores()
     {
-        std::cout << "Creating window..." << std::endl;
+        std::cout << "Creating Vulkan semaphores..." << std::endl;
 
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-        m_window = glfwCreateWindow(WindowWidth, WindowHeight, "Vulkan Tutorial", nullptr, nullptr);
+        VkSemaphoreCreateInfo semaphore_create_info = {};
+        semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+        if (vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &m_image_available_semaphore) != VK_SUCCESS ||
+            vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &m_render_finished_semaphore) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create Vulkan semaphores");
     }
 
     void main_loop()
@@ -941,12 +966,62 @@ class HelloTriangleApplication
         while (!glfwWindowShouldClose(m_window))
         {
             glfwPollEvents();
+            draw_frame();
         }
+
+        vkDeviceWaitIdle(m_device);
+    }
+
+    void draw_frame()
+    {
+        std::uint32_t image_index;
+        if (vkAcquireNextImageKHR(
+                m_device,
+                m_swap_chain,
+                std::numeric_limits<std::uint64_t>::max(),
+                m_image_available_semaphore,
+                VK_NULL_HANDLE,
+                &image_index) != VK_SUCCESS)
+            throw std::runtime_error("Failed to acquire next image from Vulkan swap chain");
+
+        const VkSemaphore wait_semaphores[] = { m_image_available_semaphore };
+        const VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+        const VkSemaphore signal_semaphores[] = { m_render_finished_semaphore };
+
+        VkSubmitInfo submit_info = {};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.waitSemaphoreCount = 1;
+        submit_info.pWaitSemaphores = wait_semaphores;
+        submit_info.pWaitDstStageMask = wait_stages;
+        submit_info.commandBufferCount = 1;
+        submit_info.pCommandBuffers = &m_command_buffers[image_index];
+        submit_info.signalSemaphoreCount = 1;
+        submit_info.pSignalSemaphores = signal_semaphores;
+
+        if (vkQueueSubmit(m_graphics_queue, 1, &submit_info, VK_NULL_HANDLE) != VK_SUCCESS)
+            throw std::runtime_error("Failed to submit Vulkan draw command buffer");
+
+        const VkSwapchainKHR swap_chains[] = { m_swap_chain };
+
+        VkPresentInfoKHR present_info = {};
+        present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        present_info.waitSemaphoreCount = 1;
+        present_info.pWaitSemaphores = signal_semaphores;
+        present_info.swapchainCount = 1;
+        present_info.pSwapchains = swap_chains;
+        present_info.pImageIndices = &image_index;
+        present_info.pResults = nullptr;
+
+        if (vkQueuePresentKHR(m_present_queue, &present_info) != VK_SUCCESS)
+            throw std::runtime_error("Failed to submit Vulkan presentation request");
     }
 
     void cleanup()
     {
         std::cout << "Cleaning up..." << std::endl;
+
+        vkDestroySemaphore(m_device, m_render_finished_semaphore, nullptr);
+        vkDestroySemaphore(m_device, m_image_available_semaphore, nullptr);
 
         vkDestroyCommandPool(m_device, m_command_pool, nullptr);
 
