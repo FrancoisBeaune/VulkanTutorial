@@ -64,7 +64,8 @@ class HelloTriangleApplication
         create_window();
         init_vulkan();
         main_loop();
-        cleanup();
+        cleanup_vulkan();
+        destroy_window();
     }
 
   private:
@@ -90,14 +91,26 @@ class HelloTriangleApplication
     std::vector<VkSemaphore>        m_image_available_semaphores;
     std::vector<VkSemaphore>        m_render_finished_semaphores;
     std::vector<VkFence>            m_in_flight_fences;
+    bool                            m_framebuffer_resized = false;
 
     void create_window()
     {
         std::cout << "Creating window..." << std::endl;
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+
         m_window = glfwCreateWindow(WindowWidth, WindowHeight, "Vulkan Tutorial", nullptr, nullptr);
+
+        glfwSetWindowUserPointer(m_window, this);
+        glfwSetFramebufferSizeCallback(m_window, framebuffer_resize_callback);
+    }
+
+    static void framebuffer_resize_callback(GLFWwindow* window, const int width, const int height)
+    {
+        HelloTriangleApplication* app =
+            reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+
+        app->m_framebuffer_resized = true;
     }
 
     void init_vulkan()
@@ -109,7 +122,6 @@ class HelloTriangleApplication
         pick_vk_physical_device();
         create_vk_logical_device();
         create_vk_swap_chain();
-        retrieve_vk_swap_chain_images();
         create_vk_swap_chain_image_views();
         create_vk_render_pass();
         create_vk_graphics_pipeline();
@@ -424,15 +436,18 @@ class HelloTriangleApplication
         return best_mode;
     }
 
-    static VkExtent2D choose_vk_swap_extent(const VkSurfaceCapabilitiesKHR& capabilities)
+    VkExtent2D choose_vk_swap_extent(const VkSurfaceCapabilitiesKHR& capabilities)
     {
         if (capabilities.currentExtent.width != std::numeric_limits<std::uint32_t>::max())
             return capabilities.currentExtent;
 
+        int window_width, window_height;
+        glfwGetFramebufferSize(m_window, &window_width, &window_height);
+
         VkExtent2D actual_extent =
         {
-            static_cast<std::uint32_t>(WindowWidth),
-            static_cast<std::uint32_t>(WindowHeight)
+            static_cast<std::uint32_t>(window_width),
+            static_cast<std::uint32_t>(window_height)
         };
 
         actual_extent.width =
@@ -613,15 +628,9 @@ class HelloTriangleApplication
 
         m_swap_chain_surface_format = surface_format.format;
         m_swap_chain_extent = extent;
-    }
 
-    void retrieve_vk_swap_chain_images()
-    {
-        std::uint32_t image_count;
         vkGetSwapchainImagesKHR(m_device, m_swap_chain, &image_count, nullptr);
-
         m_swap_chain_images.resize(image_count);
-
         vkGetSwapchainImagesKHR(m_device, m_swap_chain, &image_count, m_swap_chain_images.data());
     }
 
@@ -990,17 +999,25 @@ class HelloTriangleApplication
     void draw_frame(const std::size_t current_frame)
     {
         vkWaitForFences(m_device, 1, &m_in_flight_fences[current_frame], VK_TRUE, std::numeric_limits<std::uint64_t>::max());
-        vkResetFences(m_device, 1, &m_in_flight_fences[current_frame]);
 
         std::uint32_t image_index;
-        if (vkAcquireNextImageKHR(
+        VkResult result =
+            vkAcquireNextImageKHR(
                 m_device,
                 m_swap_chain,
                 std::numeric_limits<std::uint64_t>::max(),
                 m_image_available_semaphores[current_frame],
                 VK_NULL_HANDLE,
-                &image_index) != VK_SUCCESS)
-            throw std::runtime_error("Failed to acquire next image from Vulkan swap chain");
+                &image_index);
+        if (result == VK_ERROR_OUT_OF_DATE_KHR)
+        {
+            recreate_vk_swap_chain();
+            return;
+        }
+        else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
+            throw std::runtime_error("Failed to acquire Vulkan swap chain image");
+
+        vkResetFences(m_device, 1, &m_in_flight_fences[current_frame]);
 
         const VkSemaphore wait_semaphores[] = { m_image_available_semaphores[current_frame] };
         const VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
@@ -1030,15 +1047,74 @@ class HelloTriangleApplication
         present_info.pImageIndices = &image_index;
         present_info.pResults = nullptr;
 
-        if (vkQueuePresentKHR(m_present_queue, &present_info) != VK_SUCCESS)
-            throw std::runtime_error("Failed to submit Vulkan presentation request");
+        result = vkQueuePresentKHR(m_present_queue, &present_info);
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_framebuffer_resized)
+        {
+            m_framebuffer_resized = false;
+            recreate_vk_swap_chain();
+        }
+        else if (result != VK_SUCCESS)
+            throw std::runtime_error("Failed to present Vulkan swap chain image");
     }
 
-    void cleanup()
+    void recreate_vk_swap_chain()
+    {
+        std::cout << "Recreating Vulkan swap chain..." << std::endl;
+
+        int window_width, window_height;
+        glfwGetFramebufferSize(m_window, &window_width, &window_height);
+
+        if (window_width == 0 && window_height == 0)
+        {
+            std::cout << "Window is minimized, waiting until it is brought back to the foreground..." << std::endl;
+
+            while (window_width == 0 || window_height == 0)
+            {
+                glfwWaitEvents();
+                glfwGetFramebufferSize(m_window, &window_width, &window_height);
+            }
+        }
+
+        vkDeviceWaitIdle(m_device);
+
+        cleanup_vk_swap_chain();
+
+        create_vk_swap_chain();
+        create_vk_swap_chain_image_views();
+        create_vk_render_pass();
+        create_vk_graphics_pipeline();
+        create_vk_framebuffers();
+        allocate_vk_command_buffers();
+    }
+
+    void cleanup_vk_swap_chain()
+    {
+        for (const VkFramebuffer framebuffer : m_swap_chain_framebuffers)
+            vkDestroyFramebuffer(m_device, framebuffer, nullptr);
+
+        vkFreeCommandBuffers(
+            m_device,
+            m_command_pool,
+            static_cast<std::uint32_t>(m_command_buffers.size()),
+            m_command_buffers.data());
+
+        vkDestroyPipeline(m_device, m_graphics_pipeline, nullptr);
+        vkDestroyPipelineLayout(m_device, m_pipeline_layout, nullptr);
+        vkDestroyRenderPass(m_device, m_render_pass, nullptr);
+
+        for (const VkImageView image_view : m_swap_chain_image_views)
+            vkDestroyImageView(m_device, image_view, nullptr);
+
+        vkDestroySwapchainKHR(m_device, m_swap_chain, nullptr);
+    }
+
+    void cleanup_vulkan()
     {
         std::cout << "Cleaning up..." << std::endl;
 
         vkDeviceWaitIdle(m_device);
+
+        cleanup_vk_swap_chain();
 
         for (std::size_t i = 0; i < MaxFramesInFlight; ++i)
         {
@@ -1049,17 +1125,6 @@ class HelloTriangleApplication
 
         vkDestroyCommandPool(m_device, m_command_pool, nullptr);
 
-        for (const VkFramebuffer framebuffer : m_swap_chain_framebuffers)
-            vkDestroyFramebuffer(m_device, framebuffer, nullptr);
-
-        vkDestroyPipeline(m_device, m_graphics_pipeline, nullptr);
-        vkDestroyPipelineLayout(m_device, m_pipeline_layout, nullptr);
-        vkDestroyRenderPass(m_device, m_render_pass, nullptr);
-
-        for (const VkImageView image_view : m_swap_chain_image_views)
-            vkDestroyImageView(m_device, image_view, nullptr);
-
-        vkDestroySwapchainKHR(m_device, m_swap_chain, nullptr);
         vkDestroyDevice(m_device, nullptr);
 
         if (EnableVkValidationLayers)
@@ -1074,6 +1139,11 @@ class HelloTriangleApplication
 
         vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
         vkDestroyInstance(m_instance, nullptr);
+    }
+
+    void destroy_window()
+    {
+        std::cout << "Destroying window..." << std::endl;
 
         glfwDestroyWindow(m_window);
     }
