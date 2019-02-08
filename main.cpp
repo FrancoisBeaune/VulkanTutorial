@@ -22,6 +22,7 @@
 
 const int WindowWidth = 800;
 const int WindowHeight = 600;
+const std::size_t MaxFramesInFlight = 2;
 
 #ifdef NDEBUG
 const bool EnableVkValidationLayers = false;
@@ -86,8 +87,9 @@ class HelloTriangleApplication
     std::vector<VkFramebuffer>      m_swap_chain_framebuffers;
     VkCommandPool                   m_command_pool;
     std::vector<VkCommandBuffer>    m_command_buffers;
-    VkSemaphore                     m_image_available_semaphore;
-    VkSemaphore                     m_render_finished_semaphore;
+    std::vector<VkSemaphore>        m_image_available_semaphores;
+    std::vector<VkSemaphore>        m_render_finished_semaphores;
+    std::vector<VkFence>            m_in_flight_fences;
 
     void create_window()
     {
@@ -114,7 +116,7 @@ class HelloTriangleApplication
         create_vk_framebuffers();
         create_vk_command_pool();
         allocate_vk_command_buffers();
-        create_vk_semaphores();
+        create_vk_sync_objects();
     }
 
     static void query_vk_instance_extensions()
@@ -947,46 +949,62 @@ class HelloTriangleApplication
         }
     }
 
-    void create_vk_semaphores()
+    void create_vk_sync_objects()
     {
-        std::cout << "Creating Vulkan semaphores..." << std::endl;
+        std::cout << "Creating Vulkan synchronization objects..." << std::endl;
+
+        m_image_available_semaphores.resize(MaxFramesInFlight);
+        m_render_finished_semaphores.resize(MaxFramesInFlight);
+        m_in_flight_fences.resize(MaxFramesInFlight);
 
         VkSemaphoreCreateInfo semaphore_create_info = {};
         semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-        if (vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &m_image_available_semaphore) != VK_SUCCESS ||
-            vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &m_render_finished_semaphore) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create Vulkan semaphores");
+        VkFenceCreateInfo fence_create_info = {};
+        fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+        for (std::size_t i = 0; i < MaxFramesInFlight; ++i)
+        {
+            if (vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &m_image_available_semaphores[i]) != VK_SUCCESS ||
+                vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &m_render_finished_semaphores[i]) != VK_SUCCESS ||
+                vkCreateFence(m_device, &fence_create_info, nullptr, &m_in_flight_fences[i]) != VK_SUCCESS)
+                throw std::runtime_error("Failed to create Vulkan synchronization objects");
+        }
     }
 
     void main_loop()
     {
         std::cout << "Entering main loop..." << std::endl;
 
+        std::size_t current_frame = 0;
+
         while (!glfwWindowShouldClose(m_window))
         {
             glfwPollEvents();
-            draw_frame();
+            draw_frame(current_frame);
+            current_frame = (current_frame + 1) % MaxFramesInFlight;
         }
-
-        vkDeviceWaitIdle(m_device);
     }
 
-    void draw_frame()
+    void draw_frame(const std::size_t current_frame)
     {
+        vkWaitForFences(m_device, 1, &m_in_flight_fences[current_frame], VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+        vkResetFences(m_device, 1, &m_in_flight_fences[current_frame]);
+
         std::uint32_t image_index;
         if (vkAcquireNextImageKHR(
                 m_device,
                 m_swap_chain,
                 std::numeric_limits<std::uint64_t>::max(),
-                m_image_available_semaphore,
+                m_image_available_semaphores[current_frame],
                 VK_NULL_HANDLE,
                 &image_index) != VK_SUCCESS)
             throw std::runtime_error("Failed to acquire next image from Vulkan swap chain");
 
-        const VkSemaphore wait_semaphores[] = { m_image_available_semaphore };
+        const VkSemaphore wait_semaphores[] = { m_image_available_semaphores[current_frame] };
         const VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-        const VkSemaphore signal_semaphores[] = { m_render_finished_semaphore };
+        const VkSemaphore signal_semaphores[] = { m_render_finished_semaphores[current_frame] };
 
         VkSubmitInfo submit_info = {};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -998,7 +1016,7 @@ class HelloTriangleApplication
         submit_info.signalSemaphoreCount = 1;
         submit_info.pSignalSemaphores = signal_semaphores;
 
-        if (vkQueueSubmit(m_graphics_queue, 1, &submit_info, VK_NULL_HANDLE) != VK_SUCCESS)
+        if (vkQueueSubmit(m_graphics_queue, 1, &submit_info, m_in_flight_fences[current_frame]) != VK_SUCCESS)
             throw std::runtime_error("Failed to submit Vulkan draw command buffer");
 
         const VkSwapchainKHR swap_chains[] = { m_swap_chain };
@@ -1020,8 +1038,14 @@ class HelloTriangleApplication
     {
         std::cout << "Cleaning up..." << std::endl;
 
-        vkDestroySemaphore(m_device, m_render_finished_semaphore, nullptr);
-        vkDestroySemaphore(m_device, m_image_available_semaphore, nullptr);
+        vkDeviceWaitIdle(m_device);
+
+        for (std::size_t i = 0; i < MaxFramesInFlight; ++i)
+        {
+            vkDestroyFence(m_device, m_in_flight_fences[i], nullptr);
+            vkDestroySemaphore(m_device, m_render_finished_semaphores[i], nullptr);
+            vkDestroySemaphore(m_device, m_image_available_semaphores[i], nullptr);
+        }
 
         vkDestroyCommandPool(m_device, m_command_pool, nullptr);
 
