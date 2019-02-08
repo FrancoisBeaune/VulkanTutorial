@@ -83,6 +83,7 @@ class HelloTriangleApplication
     VkRenderPass                m_render_pass;
     VkPipelineLayout            m_pipeline_layout;
     VkPipeline                  m_graphics_pipeline;
+    std::vector<VkFramebuffer>  m_swap_chain_framebuffers;
 
     void init_vulkan()
     {
@@ -97,6 +98,7 @@ class HelloTriangleApplication
         create_vk_swap_chain_image_views();
         create_vk_render_pass();
         create_vk_graphics_pipeline();
+        create_vk_framebuffers();
     }
 
     static void query_vk_instance_extensions()
@@ -834,6 +836,30 @@ class HelloTriangleApplication
         vkDestroyShaderModule(m_device, vert_shader_module, nullptr);
     }
 
+    void create_vk_framebuffers()
+    {
+        std::cout << "Creating Vulkan framebuffers..." << std::endl;
+
+        m_swap_chain_framebuffers.resize(m_swap_chain_image_views.size());
+
+        for (std::size_t i = 0; i < m_swap_chain_image_views.size(); ++i)
+        {
+            const VkImageView attachments[] = { m_swap_chain_image_views[i] };
+
+            VkFramebufferCreateInfo framebuffer_create_info = {};
+            framebuffer_create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            framebuffer_create_info.renderPass = m_render_pass;
+            framebuffer_create_info.attachmentCount = 1;
+            framebuffer_create_info.pAttachments = attachments;
+            framebuffer_create_info.width = m_swap_chain_extent.width;
+            framebuffer_create_info.height = m_swap_chain_extent.height;
+            framebuffer_create_info.layers = 1;
+
+            if (vkCreateFramebuffer(m_device, &framebuffer_create_info, nullptr, &m_swap_chain_framebuffers[i]) != VK_SUCCESS)
+                throw std::runtime_error("Failed to create Vulkan framebuffer");
+        }
+    }
+
     void create_window()
     {
         std::cout << "Creating window..." << std::endl;
@@ -856,6 +882,9 @@ class HelloTriangleApplication
     void cleanup()
     {
         std::cout << "Cleaning up..." << std::endl;
+
+        for (const VkFramebuffer framebuffer : m_swap_chain_framebuffers)
+            vkDestroyFramebuffer(m_device, framebuffer, nullptr);
 
         vkDestroyPipeline(m_device, m_graphics_pipeline, nullptr);
         vkDestroyPipelineLayout(m_device, m_pipeline_layout, nullptr);
