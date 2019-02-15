@@ -20,6 +20,8 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include <glm/glm.hpp>
+
 const int WindowWidth = 800;
 const int WindowHeight = 600;
 const std::size_t MaxFramesInFlight = 2;
@@ -30,6 +32,38 @@ const bool EnableVkValidationLayers = false;
 const bool EnableVkValidationLayers = true;
 #endif
 
+struct Vertex
+{
+    glm::vec2 m_position;
+    glm::vec3 m_color;
+
+    static VkVertexInputBindingDescription get_binding_description()
+    {
+        VkVertexInputBindingDescription binding_description = {};
+        binding_description.binding = 0;
+        binding_description.stride = sizeof(Vertex);
+        binding_description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        return binding_description;
+    }
+
+    static std::array<VkVertexInputAttributeDescription, 2> get_attribute_descriptions()
+    {
+        std::array<VkVertexInputAttributeDescription, 2> attribute_descriptions = {};
+
+        attribute_descriptions[0].binding = 0;
+        attribute_descriptions[0].location = 0;
+        attribute_descriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+        attribute_descriptions[0].offset = offsetof(Vertex, m_position);
+
+        attribute_descriptions[1].binding = 0;
+        attribute_descriptions[1].location = 1;
+        attribute_descriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attribute_descriptions[1].offset = offsetof(Vertex, m_color);
+
+        return attribute_descriptions;
+    }
+};
+
 const std::vector<const char*> ValidationLayers =
 {
     "VK_LAYER_LUNARG_standard_validation"
@@ -38,6 +72,13 @@ const std::vector<const char*> ValidationLayers =
 const std::vector<const char*> DeviceExtensions =
 {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
+};
+
+const std::vector<Vertex> Vertices =
+{
+    { {  0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+    { {  0.5f,  0.5f }, { 0.0f, 1.0f, 0.0f } },
+    { { -0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } }
 };
 
 #define EXPECT_VK_SUCCESS(expression) \
@@ -87,6 +128,8 @@ class HelloTriangleApplication
     VkPipeline                      m_graphics_pipeline;
     std::vector<VkFramebuffer>      m_swap_chain_framebuffers;
     VkCommandPool                   m_command_pool;
+    VkBuffer                        m_vertex_buffer;
+    VkDeviceMemory                  m_vertex_buffer_memory;
     std::vector<VkCommandBuffer>    m_command_buffers;
     std::vector<VkSemaphore>        m_image_available_semaphores;
     std::vector<VkSemaphore>        m_render_finished_semaphores;
@@ -127,6 +170,7 @@ class HelloTriangleApplication
         create_vk_graphics_pipeline();
         create_vk_framebuffers();
         create_vk_command_pool();
+        create_vk_vertex_buffer();
         allocate_vk_command_buffers();
         create_vk_sync_objects();
     }
@@ -760,12 +804,15 @@ class HelloTriangleApplication
             frag_shader_stage_info
         };
 
+        const auto binding_description = Vertex::get_binding_description();
+        const auto attribute_descriptions = Vertex::get_attribute_descriptions();
+
         VkPipelineVertexInputStateCreateInfo vertex_input_info = {};
         vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertex_input_info.vertexBindingDescriptionCount = 0;
-        vertex_input_info.pVertexBindingDescriptions = nullptr;
-        vertex_input_info.vertexAttributeDescriptionCount = 0;
-        vertex_input_info.pVertexAttributeDescriptions = nullptr;
+        vertex_input_info.vertexBindingDescriptionCount = 1;
+        vertex_input_info.pVertexBindingDescriptions = &binding_description;
+        vertex_input_info.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(attribute_descriptions.size());
+        vertex_input_info.pVertexAttributeDescriptions = attribute_descriptions.data();
 
         VkPipelineInputAssemblyStateCreateInfo input_assembly = {};
         input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -912,6 +959,60 @@ class HelloTriangleApplication
             throw std::runtime_error("Failed to create Vulkan command pool");
     }
 
+    std::uint32_t find_vk_memory_type(const std::uint32_t type_filter, const VkMemoryPropertyFlags properties)
+    {
+        VkPhysicalDeviceMemoryProperties physical_mem_properties;
+        vkGetPhysicalDeviceMemoryProperties(m_physical_device, &physical_mem_properties);
+
+        for (std::uint32_t i = 0; i < physical_mem_properties.memoryTypeCount; ++i)
+        {
+            if ((type_filter & (1UL << i)) &&
+                (physical_mem_properties.memoryTypes[i].propertyFlags & properties) == properties)
+                return i;
+        }
+
+        throw std::runtime_error("Failed to find suitable Vulkan memory type");
+    }
+
+    void create_vk_vertex_buffer()
+    {
+        std::cout << "Creating Vulkan vertex buffer..." << std::endl;
+
+        VkBufferCreateInfo create_info = {};
+        create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        create_info.size = sizeof(Vertices[0]) * Vertices.size();
+        create_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        if (vkCreateBuffer(m_device, &create_info, nullptr, &m_vertex_buffer) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create Vulkan vertex buffer");
+
+        VkMemoryRequirements mem_requirements;
+        vkGetBufferMemoryRequirements(m_device, m_vertex_buffer, &mem_requirements);
+
+        VkMemoryAllocateInfo alloc_info = {};
+        alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc_info.allocationSize = mem_requirements.size;
+        alloc_info.memoryTypeIndex =
+            find_vk_memory_type(
+                mem_requirements.memoryTypeBits,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        if (vkAllocateMemory(m_device, &alloc_info, nullptr, &m_vertex_buffer_memory) != VK_SUCCESS)
+            throw std::runtime_error("Failed to allocate Vulkan vertex buffer memory");
+
+        if (vkBindBufferMemory(m_device, m_vertex_buffer, m_vertex_buffer_memory, 0) != VK_SUCCESS)
+            throw std::runtime_error("Failed to bind vertex buffer memory to Vulkan vertex buffer");
+
+        void* data;
+        if (vkMapMemory(m_device, m_vertex_buffer_memory, 0, create_info.size, 0, &data) != VK_SUCCESS)
+            throw std::runtime_error("Failed to map Vulkan vertex buffer memory to host address space");
+
+        std::memcpy(data, Vertices.data(), static_cast<std::size_t>(create_info.size));
+
+        vkUnmapMemory(m_device, m_vertex_buffer_memory);
+    }
+
     void allocate_vk_command_buffers()
     {
         std::cout << "Allocating Vulkan command buffers..." << std::endl;
@@ -949,8 +1050,15 @@ class HelloTriangleApplication
             render_pass_begin_info.pClearValues = &clear_color;
 
             vkCmdBeginRenderPass(m_command_buffers[i], &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
             vkCmdBindPipeline(m_command_buffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphics_pipeline);
-            vkCmdDraw(m_command_buffers[i], 3, 1, 0, 0);
+
+            const VkBuffer vertex_buffers[] = { m_vertex_buffer };
+            const VkDeviceSize offsets[] = { 0 };
+            vkCmdBindVertexBuffers(m_command_buffers[i], 0, 1, vertex_buffers, offsets);
+
+            vkCmdDraw(m_command_buffers[i], static_cast<std::uint32_t>(Vertices.size()), 1, 0, 0);
+
             vkCmdEndRenderPass(m_command_buffers[i]);
 
             if (vkEndCommandBuffer(m_command_buffers[i]) != VK_SUCCESS)
@@ -1115,6 +1223,9 @@ class HelloTriangleApplication
         vkDeviceWaitIdle(m_device);
 
         cleanup_vk_swap_chain();
+
+        vkDestroyBuffer(m_device, m_vertex_buffer, nullptr);
+        vkFreeMemory(m_device, m_vertex_buffer_memory, nullptr);
 
         for (std::size_t i = 0; i < MaxFramesInFlight; ++i)
         {
