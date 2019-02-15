@@ -975,41 +975,55 @@ class HelloTriangleApplication
         throw std::runtime_error("Failed to find suitable Vulkan memory type");
     }
 
-    void create_vk_vertex_buffer()
+    void create_vk_buffer(
+        const VkDeviceSize          size,
+        const VkBufferUsageFlags    usage,
+        const VkMemoryPropertyFlags properties,
+        VkBuffer&                   buffer,
+        VkDeviceMemory&             buffer_memory)
     {
-        std::cout << "Creating Vulkan vertex buffer..." << std::endl;
-
         VkBufferCreateInfo create_info = {};
         create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        create_info.size = sizeof(Vertices[0]) * Vertices.size();
-        create_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        create_info.size = size;
+        create_info.usage = usage;
         create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        if (vkCreateBuffer(m_device, &create_info, nullptr, &m_vertex_buffer) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create Vulkan vertex buffer");
+        if (vkCreateBuffer(m_device, &create_info, nullptr, &buffer) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create Vulkan buffer");
 
         VkMemoryRequirements mem_requirements;
-        vkGetBufferMemoryRequirements(m_device, m_vertex_buffer, &mem_requirements);
+        vkGetBufferMemoryRequirements(m_device, buffer, &mem_requirements);
 
         VkMemoryAllocateInfo alloc_info = {};
         alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         alloc_info.allocationSize = mem_requirements.size;
-        alloc_info.memoryTypeIndex =
-            find_vk_memory_type(
-                mem_requirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        alloc_info.memoryTypeIndex = find_vk_memory_type(mem_requirements.memoryTypeBits, properties);
 
-        if (vkAllocateMemory(m_device, &alloc_info, nullptr, &m_vertex_buffer_memory) != VK_SUCCESS)
-            throw std::runtime_error("Failed to allocate Vulkan vertex buffer memory");
+        if (vkAllocateMemory(m_device, &alloc_info, nullptr, &buffer_memory) != VK_SUCCESS)
+            throw std::runtime_error("Failed to allocate Vulkan buffer memory");
 
-        if (vkBindBufferMemory(m_device, m_vertex_buffer, m_vertex_buffer_memory, 0) != VK_SUCCESS)
-            throw std::runtime_error("Failed to bind vertex buffer memory to Vulkan vertex buffer");
+        if (vkBindBufferMemory(m_device, buffer, buffer_memory, 0) != VK_SUCCESS)
+            throw std::runtime_error("Failed to bind Vulkan buffer memory to buffer");
+    }
+
+    void create_vk_vertex_buffer()
+    {
+        std::cout << "Creating Vulkan vertex buffer..." << std::endl;
+
+        const VkDeviceSize buffer_size = sizeof(Vertices[0]) * Vertices.size();
+
+        create_vk_buffer(
+            buffer_size,
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            m_vertex_buffer,
+            m_vertex_buffer_memory);
 
         void* data;
-        if (vkMapMemory(m_device, m_vertex_buffer_memory, 0, create_info.size, 0, &data) != VK_SUCCESS)
+        if (vkMapMemory(m_device, m_vertex_buffer_memory, 0, buffer_size, 0, &data) != VK_SUCCESS)
             throw std::runtime_error("Failed to map Vulkan vertex buffer memory to host address space");
 
-        std::memcpy(data, Vertices.data(), static_cast<std::size_t>(create_info.size));
+        std::memcpy(data, Vertices.data(), static_cast<std::size_t>(buffer_size));
 
         vkUnmapMemory(m_device, m_vertex_buffer_memory);
     }
