@@ -1,3 +1,7 @@
+#include "vku.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 #include <algorithm>
 #include <array>
@@ -162,6 +166,9 @@ class HelloTriangleApplication
     std::vector<VkBuffer>           m_uniform_buffers;
     std::vector<VkDeviceMemory>     m_uniform_buffers_memory;
 
+    VkImage                         m_texture_image;
+    VkDeviceMemory                  m_texture_image_memory;
+
     VkDescriptorPool                m_descriptor_pool;
     std::vector<VkDescriptorSet>    m_descriptor_sets;
 
@@ -195,6 +202,8 @@ class HelloTriangleApplication
 
     void init_vulkan()
     {
+        std::cout << "Initializing Vulkan..." << std::endl;
+
         query_vk_instance_extensions();
         create_vk_instance();
         setup_vk_debug_messenger();
@@ -208,6 +217,7 @@ class HelloTriangleApplication
         create_vk_graphics_pipeline();
         create_vk_framebuffers();
         create_vk_command_pools();
+        create_vk_texture_image();
         create_vk_vertex_buffer();
         create_vk_index_buffer();
         create_vk_uniform_buffers();
@@ -1030,100 +1040,78 @@ class HelloTriangleApplication
         create_vk_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, m_transient_command_pool);
     }
 
-    std::uint32_t find_vk_memory_type(
-        const std::uint32_t         type_filter,
-        const VkMemoryPropertyFlags properties) const
+    void create_vk_texture_image()
     {
-        VkPhysicalDeviceMemoryProperties physical_mem_properties;
-        vkGetPhysicalDeviceMemoryProperties(m_physical_device, &physical_mem_properties);
+        int tex_width, tex_height, tex_channels;
+        stbi_uc* texels =
+            stbi_load("textures/statue.jpg", &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha);
 
-        for (std::uint32_t i = 0; i < physical_mem_properties.memoryTypeCount; ++i)
-        {
-            if ((type_filter & (1UL << i)) &&
-                (physical_mem_properties.memoryTypes[i].propertyFlags & properties) == properties)
-                return i;
-        }
+        if (texels == nullptr)
+            throw std::runtime_error("Failed to load texture file");
 
-        throw std::runtime_error("Failed to find suitable Vulkan memory type");
-    }
+        const VkDeviceSize texture_size = tex_width * tex_height * 4;
 
-    void create_vk_buffer(
-        const VkDeviceSize          size,
-        const VkBufferUsageFlags    usage,
-        const VkMemoryPropertyFlags properties,
-        VkBuffer&                   buffer,
-        VkDeviceMemory&             buffer_memory) const
-    {
-        VkBufferCreateInfo create_info = {};
-        create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        create_info.size = size;
-        create_info.usage = usage;
-        create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VkBuffer staging_buffer;
+        VkDeviceMemory staging_buffer_memory;
 
-        if (vkCreateBuffer(m_device, &create_info, nullptr, &buffer) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create Vulkan buffer");
+        vku_create_buffer(
+            m_physical_device,
+            m_device,
+            texture_size,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            staging_buffer,
+            staging_buffer_memory);
 
-        VkMemoryRequirements mem_requirements;
-        vkGetBufferMemoryRequirements(m_device, buffer, &mem_requirements);
+        vku_copy_host_to_device(
+            m_device,
+            staging_buffer_memory,
+            texels,
+            texture_size);
 
-        VkMemoryAllocateInfo alloc_info = {};
-        alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        alloc_info.allocationSize = mem_requirements.size;
-        alloc_info.memoryTypeIndex = find_vk_memory_type(mem_requirements.memoryTypeBits, properties);
+        stbi_image_free(texels);
 
-        if (vkAllocateMemory(m_device, &alloc_info, nullptr, &buffer_memory) != VK_SUCCESS)
-            throw std::runtime_error("Failed to allocate Vulkan buffer memory");
+        vku_create_image(
+            m_physical_device,
+            m_device,
+            static_cast<std::uint32_t>(tex_width),
+            static_cast<std::uint32_t>(tex_height),
+            VK_FORMAT_R8G8B8A8_UNORM,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            m_texture_image,
+            m_texture_image_memory);
 
-        if (vkBindBufferMemory(m_device, buffer, buffer_memory, 0) != VK_SUCCESS)
-            throw std::runtime_error("Failed to bind Vulkan buffer memory to buffer");
-    }
-    
-    void allocate_vk_command_buffers(
-        const VkCommandPool         command_pool,
-        const std::size_t           command_buffer_count,
-        VkCommandBuffer*            command_buffers) const
-    {
-        VkCommandBufferAllocateInfo alloc_info = {};
-        alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        alloc_info.commandPool = command_pool;
-        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        alloc_info.commandBufferCount = static_cast<std::uint32_t>(command_buffer_count);
+        vku_transition_image_layout(
+            m_device,
+            m_graphics_queue,
+            m_transient_command_pool,
+            m_texture_image,
+            VK_FORMAT_R8G8B8A8_UNORM,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-        if (vkAllocateCommandBuffers(m_device, &alloc_info, command_buffers) != VK_SUCCESS)
-            throw std::runtime_error("Failed to allocate Vulkan command buffer(s)");
-    }
+        vku_copy_buffer_to_image(
+            m_device,
+            m_graphics_queue,
+            m_transient_command_pool,
+            m_texture_image,
+            staging_buffer,
+            static_cast<std::uint32_t>(tex_width),
+            static_cast<std::uint32_t>(tex_height));
 
-    void copy_vk_buffer(
-        const VkBuffer              src_buffer,
-        const VkBuffer              dst_buffer,
-        const VkDeviceSize          size) const
-    {
-        VkCommandBuffer command_buffer;
-        allocate_vk_command_buffers(m_transient_command_pool, 1, &command_buffer);
+        vku_transition_image_layout(
+            m_device,
+            m_graphics_queue,
+            m_transient_command_pool,
+            m_texture_image,
+            VK_FORMAT_R8G8B8A8_UNORM,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-        VkCommandBufferBeginInfo begin_info = {};
-        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        if (vkBeginCommandBuffer(command_buffer, &begin_info) != VK_SUCCESS)
-            throw std::runtime_error("Failed to begin recording Vulkan command buffer");
-
-        VkBufferCopy copy_region = {};
-        copy_region.srcOffset = 0;
-        copy_region.dstOffset = 0;
-        copy_region.size = size;
-        vkCmdCopyBuffer(command_buffer, src_buffer, dst_buffer, 1, &copy_region);
-
-        vkEndCommandBuffer(command_buffer);
-
-        VkSubmitInfo submit_info = {};
-        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit_info.commandBufferCount = 1;
-        submit_info.pCommandBuffers = &command_buffer;
-        vkQueueSubmit(m_graphics_queue, 1, &submit_info, VK_NULL_HANDLE);
-
-        vkQueueWaitIdle(m_graphics_queue);
-
-        vkFreeCommandBuffers(m_device, m_transient_command_pool, 1, &command_buffer);
+        vkDestroyBuffer(m_device, staging_buffer, nullptr);
+        vkFreeMemory(m_device, staging_buffer_memory, nullptr);
     }
 
     void create_vk_vertex_buffer()
@@ -1134,27 +1122,37 @@ class HelloTriangleApplication
 
         VkBuffer staging_buffer;
         VkDeviceMemory staging_buffer_memory;
-        create_vk_buffer(
+        vku_create_buffer(
+            m_physical_device,
+            m_device,
             buffer_size,
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             staging_buffer,
             staging_buffer_memory);
 
-        void* data;
-        if (vkMapMemory(m_device, staging_buffer_memory, 0, buffer_size, 0, &data) != VK_SUCCESS)
-            throw std::runtime_error("Failed to map Vulkan buffer memory to host address space");
-        std::memcpy(data, Vertices.data(), static_cast<std::size_t>(buffer_size));
-        vkUnmapMemory(m_device, staging_buffer_memory);
+        vku_copy_host_to_device(
+            m_device,
+            staging_buffer_memory,
+            Vertices.data(),
+            buffer_size);
 
-        create_vk_buffer(
+        vku_create_buffer(
+            m_physical_device,
+            m_device,
             buffer_size,
             VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             m_vertex_buffer,
             m_vertex_buffer_memory);
 
-        copy_vk_buffer(staging_buffer, m_vertex_buffer, buffer_size);
+        vku_copy_buffer_sync(
+            m_device,
+            m_graphics_queue,
+            m_transient_command_pool,
+            m_vertex_buffer,
+            staging_buffer,
+            buffer_size);
 
         vkDestroyBuffer(m_device, staging_buffer, nullptr);
         vkFreeMemory(m_device, staging_buffer_memory, nullptr);
@@ -1168,7 +1166,9 @@ class HelloTriangleApplication
 
         VkBuffer staging_buffer;
         VkDeviceMemory staging_buffer_memory;
-        create_vk_buffer(
+        vku_create_buffer(
+            m_physical_device,
+            m_device,
             buffer_size,
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -1181,14 +1181,22 @@ class HelloTriangleApplication
         std::memcpy(data, Indices.data(), static_cast<std::size_t>(buffer_size));
         vkUnmapMemory(m_device, staging_buffer_memory);
 
-        create_vk_buffer(
+        vku_create_buffer(
+            m_physical_device,
+            m_device,
             buffer_size,
             VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             m_index_buffer,
             m_index_buffer_memory);
 
-        copy_vk_buffer(staging_buffer, m_index_buffer, buffer_size);
+        vku_copy_buffer_sync(
+            m_device,
+            m_graphics_queue,
+            m_transient_command_pool,
+            m_index_buffer,
+            staging_buffer,
+            buffer_size);
 
         vkDestroyBuffer(m_device, staging_buffer, nullptr);
         vkFreeMemory(m_device, staging_buffer_memory, nullptr);
@@ -1205,7 +1213,9 @@ class HelloTriangleApplication
 
         for (std::size_t i = 0; i < m_swap_chain_images.size(); ++i)
         {
-            create_vk_buffer(
+            vku_create_buffer(
+                m_physical_device,
+                m_device,
                 buffer_size,
                 VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -1268,7 +1278,11 @@ class HelloTriangleApplication
         std::cout << "Creating Vulkan command buffers..." << std::endl;
 
         m_command_buffers.resize(m_swap_chain_framebuffers.size());
-        allocate_vk_command_buffers(m_command_pool, m_command_buffers.size(), m_command_buffers.data());
+        vku_allocate_command_buffers(
+            m_device,
+            m_command_pool,
+            static_cast<std::uint32_t>(m_command_buffers.size()),
+            m_command_buffers.data());
 
         for (std::size_t i = 0; i < m_command_buffers.size(); ++i)
         {
@@ -1445,12 +1459,11 @@ class HelloTriangleApplication
         // Account for GLM being initially designed for OpenGL.
         ubo.m_proj[1][1] *= -1.0f;
 
-        // TODO: split into separate function.
-        void* data;
-        if (vkMapMemory(m_device, m_uniform_buffers_memory[current_image], 0, sizeof(ubo), 0, &data) != VK_SUCCESS)
-            throw std::runtime_error("Failed to map Vulkan buffer memory to host address space");
-        std::memcpy(data, &ubo, sizeof(ubo));
-        vkUnmapMemory(m_device, m_uniform_buffers_memory[current_image]);
+        vku_copy_host_to_device(
+            m_device,
+            m_uniform_buffers_memory[current_image],
+            &ubo,
+            static_cast<VkDeviceSize>(sizeof(ubo)));
     }
 
     void recreate_vk_swap_chain()
@@ -1485,6 +1498,8 @@ class HelloTriangleApplication
 
     void cleanup_vk_swap_chain()
     {
+        std::cout << "Cleaning up Vulkan swap chain..." << std::endl;
+
         for (const VkFramebuffer framebuffer : m_swap_chain_framebuffers)
             vkDestroyFramebuffer(m_device, framebuffer, nullptr);
 
@@ -1506,11 +1521,14 @@ class HelloTriangleApplication
 
     void cleanup_vulkan()
     {
-        std::cout << "Cleaning up..." << std::endl;
+        std::cout << "Cleaning up Vulkan..." << std::endl;
 
         vkDeviceWaitIdle(m_device);
 
         cleanup_vk_swap_chain();
+
+        vkDestroyImage(m_device, m_texture_image, nullptr);
+        vkFreeMemory(m_device, m_texture_image_memory, nullptr);
 
         vkDestroyDescriptorPool(m_device, m_descriptor_pool, nullptr);
 
