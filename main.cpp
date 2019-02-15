@@ -76,9 +76,16 @@ const std::vector<const char*> DeviceExtensions =
 
 const std::vector<Vertex> Vertices =
 {
-    { {  0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
-    { {  0.5f,  0.5f }, { 0.0f, 1.0f, 0.0f } },
-    { { -0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } }
+    { { -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+    { {  0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f } },
+    { {  0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } },
+    { { -0.5f,  0.5f }, { 1.0f, 1.0f, 1.0f } }
+};
+
+const std::vector<std::uint16_t> Indices =
+{
+    0, 1, 2,
+    2, 3, 0
 };
 
 #define EXPECT_VK_SUCCESS(expression) \
@@ -131,6 +138,8 @@ class HelloTriangleApplication
     VkCommandPool                   m_transient_command_pool;
     VkBuffer                        m_vertex_buffer;
     VkDeviceMemory                  m_vertex_buffer_memory;
+    VkBuffer                        m_index_buffer;
+    VkDeviceMemory                  m_index_buffer_memory;
     std::vector<VkCommandBuffer>    m_command_buffers;
     std::vector<VkSemaphore>        m_image_available_semaphores;
     std::vector<VkSemaphore>        m_render_finished_semaphores;
@@ -172,7 +181,8 @@ class HelloTriangleApplication
         create_vk_framebuffers();
         create_vk_command_pools();
         create_vk_vertex_buffer();
-        allocate_vk_command_buffers();
+        create_vk_index_buffer();
+        create_vk_command_buffers();
         create_vk_sync_objects();
     }
 
@@ -1080,7 +1090,7 @@ class HelloTriangleApplication
 
         void* data;
         if (vkMapMemory(m_device, staging_buffer_memory, 0, buffer_size, 0, &data) != VK_SUCCESS)
-            throw std::runtime_error("Failed to map Vulkan vertex buffer memory to host address space");
+            throw std::runtime_error("Failed to map Vulkan buffer memory to host address space");
         std::memcpy(data, Vertices.data(), static_cast<std::size_t>(buffer_size));
         vkUnmapMemory(m_device, staging_buffer_memory);
 
@@ -1097,9 +1107,43 @@ class HelloTriangleApplication
         vkFreeMemory(m_device, staging_buffer_memory, nullptr);
     }
 
-    void allocate_vk_command_buffers()
+    void create_vk_index_buffer()
     {
-        std::cout << "Allocating Vulkan command buffers..." << std::endl;
+        std::cout << "Creating Vulkan index buffer..." << std::endl;
+
+        const VkDeviceSize buffer_size = sizeof(Indices[0]) * Indices.size();
+
+        VkBuffer staging_buffer;
+        VkDeviceMemory staging_buffer_memory;
+        create_vk_buffer(
+            buffer_size,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            staging_buffer,
+            staging_buffer_memory);
+
+        void* data;
+        if (vkMapMemory(m_device, staging_buffer_memory, 0, buffer_size, 0, &data) != VK_SUCCESS)
+            throw std::runtime_error("Failed to map Vulkan buffer memory to host address space");
+        std::memcpy(data, Indices.data(), static_cast<std::size_t>(buffer_size));
+        vkUnmapMemory(m_device, staging_buffer_memory);
+
+        create_vk_buffer(
+            buffer_size,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            m_index_buffer,
+            m_index_buffer_memory);
+
+        copy_vk_buffer(staging_buffer, m_index_buffer, buffer_size);
+
+        vkDestroyBuffer(m_device, staging_buffer, nullptr);
+        vkFreeMemory(m_device, staging_buffer_memory, nullptr);
+    }
+
+    void create_vk_command_buffers()
+    {
+        std::cout << "Creating Vulkan command buffers..." << std::endl;
 
         m_command_buffers.resize(m_swap_chain_framebuffers.size());
         allocate_vk_command_buffers(m_command_pool, m_command_buffers.size(), m_command_buffers.data());
@@ -1131,7 +1175,9 @@ class HelloTriangleApplication
             const VkDeviceSize offsets[] = { 0 };
             vkCmdBindVertexBuffers(m_command_buffers[i], 0, 1, vertex_buffers, offsets);
 
-            vkCmdDraw(m_command_buffers[i], static_cast<std::uint32_t>(Vertices.size()), 1, 0, 0);
+            vkCmdBindIndexBuffer(m_command_buffers[i], m_index_buffer, 0, VK_INDEX_TYPE_UINT16);
+
+            vkCmdDrawIndexed(m_command_buffers[i], static_cast<std::uint32_t>(Indices.size()), 1, 0, 0, 0);
 
             vkCmdEndRenderPass(m_command_buffers[i]);
 
@@ -1266,7 +1312,7 @@ class HelloTriangleApplication
         create_vk_render_pass();
         create_vk_graphics_pipeline();
         create_vk_framebuffers();
-        allocate_vk_command_buffers();
+        create_vk_command_buffers();
     }
 
     void cleanup_vk_swap_chain()
@@ -1297,6 +1343,9 @@ class HelloTriangleApplication
         vkDeviceWaitIdle(m_device);
 
         cleanup_vk_swap_chain();
+
+        vkDestroyBuffer(m_device, m_index_buffer, nullptr);
+        vkFreeMemory(m_device, m_index_buffer_memory, nullptr);
 
         vkDestroyBuffer(m_device, m_vertex_buffer, nullptr);
         vkFreeMemory(m_device, m_vertex_buffer_memory, nullptr);
