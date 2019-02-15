@@ -710,6 +710,7 @@ class HelloTriangleApplication
     static std::vector<char> read_file(const std::string& filepath)
     {
         std::ifstream file(filepath, std::ios::ate | std::ios::binary);
+        file.exceptions(std::ifstream::failbit | std::ifstream::badbit);
 
         const std::size_t file_size = static_cast<std::size_t>(file.tellg());
         std::vector<char> file_content(file_size);
