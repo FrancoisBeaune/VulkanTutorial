@@ -128,6 +128,7 @@ class HelloTriangleApplication
     VkPipeline                      m_graphics_pipeline;
     std::vector<VkFramebuffer>      m_swap_chain_framebuffers;
     VkCommandPool                   m_command_pool;
+    VkCommandPool                   m_transient_command_pool;
     VkBuffer                        m_vertex_buffer;
     VkDeviceMemory                  m_vertex_buffer_memory;
     std::vector<VkCommandBuffer>    m_command_buffers;
@@ -169,7 +170,7 @@ class HelloTriangleApplication
         create_vk_render_pass();
         create_vk_graphics_pipeline();
         create_vk_framebuffers();
-        create_vk_command_pool();
+        create_vk_command_pools();
         create_vk_vertex_buffer();
         allocate_vk_command_buffers();
         create_vk_sync_objects();
@@ -945,22 +946,30 @@ class HelloTriangleApplication
         }
     }
 
-    void create_vk_command_pool()
+    void create_vk_command_pool(const VkCommandPoolCreateFlags flags, VkCommandPool& command_pool)
     {
-        std::cout << "Creating Vulkan command pool..." << std::endl;
-
         const QueueFamilyIndices queue_family_indices = find_vk_queue_families(m_physical_device);
 
         VkCommandPoolCreateInfo pool_create_info = {};
         pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         pool_create_info.queueFamilyIndex = queue_family_indices.m_graphics_family.value();
-        pool_create_info.flags = 0;
+        pool_create_info.flags = flags;
 
-        if (vkCreateCommandPool(m_device, &pool_create_info, nullptr, &m_command_pool) != VK_SUCCESS)
+        if (vkCreateCommandPool(m_device, &pool_create_info, nullptr, &command_pool) != VK_SUCCESS)
             throw std::runtime_error("Failed to create Vulkan command pool");
     }
 
-    std::uint32_t find_vk_memory_type(const std::uint32_t type_filter, const VkMemoryPropertyFlags properties)
+    void create_vk_command_pools()
+    {
+        std::cout << "Creating Vulkan command pools..." << std::endl;
+
+        create_vk_command_pool(0, m_command_pool);
+        create_vk_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, m_transient_command_pool);
+    }
+
+    std::uint32_t find_vk_memory_type(
+        const std::uint32_t         type_filter,
+        const VkMemoryPropertyFlags properties) const
     {
         VkPhysicalDeviceMemoryProperties physical_mem_properties;
         vkGetPhysicalDeviceMemoryProperties(m_physical_device, &physical_mem_properties);
@@ -980,7 +989,7 @@ class HelloTriangleApplication
         const VkBufferUsageFlags    usage,
         const VkMemoryPropertyFlags properties,
         VkBuffer&                   buffer,
-        VkDeviceMemory&             buffer_memory)
+        VkDeviceMemory&             buffer_memory) const
     {
         VkBufferCreateInfo create_info = {};
         create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -1005,6 +1014,54 @@ class HelloTriangleApplication
         if (vkBindBufferMemory(m_device, buffer, buffer_memory, 0) != VK_SUCCESS)
             throw std::runtime_error("Failed to bind Vulkan buffer memory to buffer");
     }
+    
+    void allocate_vk_command_buffers(
+        const VkCommandPool         command_pool,
+        const std::size_t           command_buffer_count,
+        VkCommandBuffer*            command_buffers) const
+    {
+        VkCommandBufferAllocateInfo alloc_info = {};
+        alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc_info.commandPool = command_pool;
+        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc_info.commandBufferCount = static_cast<std::uint32_t>(command_buffer_count);
+
+        if (vkAllocateCommandBuffers(m_device, &alloc_info, command_buffers) != VK_SUCCESS)
+            throw std::runtime_error("Failed to allocate Vulkan command buffer(s)");
+    }
+
+    void copy_vk_buffer(
+        const VkBuffer              src_buffer,
+        const VkBuffer              dst_buffer,
+        const VkDeviceSize          size) const
+    {
+        VkCommandBuffer command_buffer;
+        allocate_vk_command_buffers(m_transient_command_pool, 1, &command_buffer);
+
+        VkCommandBufferBeginInfo begin_info = {};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        if (vkBeginCommandBuffer(command_buffer, &begin_info) != VK_SUCCESS)
+            throw std::runtime_error("Failed to begin recording Vulkan command buffer");
+
+        VkBufferCopy copy_region = {};
+        copy_region.srcOffset = 0;
+        copy_region.dstOffset = 0;
+        copy_region.size = size;
+        vkCmdCopyBuffer(command_buffer, src_buffer, dst_buffer, 1, &copy_region);
+
+        vkEndCommandBuffer(command_buffer);
+
+        VkSubmitInfo submit_info = {};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.commandBufferCount = 1;
+        submit_info.pCommandBuffers = &command_buffer;
+        vkQueueSubmit(m_graphics_queue, 1, &submit_info, VK_NULL_HANDLE);
+
+        vkQueueWaitIdle(m_graphics_queue);
+
+        vkFreeCommandBuffers(m_device, m_transient_command_pool, 1, &command_buffer);
+    }
 
     void create_vk_vertex_buffer()
     {
@@ -1012,20 +1069,32 @@ class HelloTriangleApplication
 
         const VkDeviceSize buffer_size = sizeof(Vertices[0]) * Vertices.size();
 
+        VkBuffer staging_buffer;
+        VkDeviceMemory staging_buffer_memory;
         create_vk_buffer(
             buffer_size,
-            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            staging_buffer,
+            staging_buffer_memory);
+
+        void* data;
+        if (vkMapMemory(m_device, staging_buffer_memory, 0, buffer_size, 0, &data) != VK_SUCCESS)
+            throw std::runtime_error("Failed to map Vulkan vertex buffer memory to host address space");
+        std::memcpy(data, Vertices.data(), static_cast<std::size_t>(buffer_size));
+        vkUnmapMemory(m_device, staging_buffer_memory);
+
+        create_vk_buffer(
+            buffer_size,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             m_vertex_buffer,
             m_vertex_buffer_memory);
 
-        void* data;
-        if (vkMapMemory(m_device, m_vertex_buffer_memory, 0, buffer_size, 0, &data) != VK_SUCCESS)
-            throw std::runtime_error("Failed to map Vulkan vertex buffer memory to host address space");
+        copy_vk_buffer(staging_buffer, m_vertex_buffer, buffer_size);
 
-        std::memcpy(data, Vertices.data(), static_cast<std::size_t>(buffer_size));
-
-        vkUnmapMemory(m_device, m_vertex_buffer_memory);
+        vkDestroyBuffer(m_device, staging_buffer, nullptr);
+        vkFreeMemory(m_device, staging_buffer_memory, nullptr);
     }
 
     void allocate_vk_command_buffers()
@@ -1033,23 +1102,13 @@ class HelloTriangleApplication
         std::cout << "Allocating Vulkan command buffers..." << std::endl;
 
         m_command_buffers.resize(m_swap_chain_framebuffers.size());
-
-        VkCommandBufferAllocateInfo alloc_info = {};
-        alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        alloc_info.commandPool = m_command_pool;
-        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        alloc_info.commandBufferCount = static_cast<std::uint32_t>(m_command_buffers.size());
-
-        if (vkAllocateCommandBuffers(m_device, &alloc_info, m_command_buffers.data()) != VK_SUCCESS)
-            throw std::runtime_error("Failed to allocate Vulkan command buffer");
+        allocate_vk_command_buffers(m_command_pool, m_command_buffers.size(), m_command_buffers.data());
 
         for (std::size_t i = 0; i < m_command_buffers.size(); ++i)
         {
             VkCommandBufferBeginInfo begin_info = {};
             begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
             begin_info.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
-            begin_info.pInheritanceInfo = nullptr;
-
             if (vkBeginCommandBuffer(m_command_buffers[i], &begin_info) != VK_SUCCESS)
                 throw std::runtime_error("Failed to begin recording Vulkan command buffer");
 
@@ -1249,6 +1308,7 @@ class HelloTriangleApplication
             vkDestroySemaphore(m_device, m_image_available_semaphores[i], nullptr);
         }
 
+        vkDestroyCommandPool(m_device, m_transient_command_pool, nullptr);
         vkDestroyCommandPool(m_device, m_command_pool, nullptr);
 
         vkDestroyDevice(m_device, nullptr);
