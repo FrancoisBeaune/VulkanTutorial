@@ -28,6 +28,7 @@
 #include <GLFW/glfw3.h>
 
 #define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -56,7 +57,7 @@ struct UniformBufferObject
 
 struct Vertex
 {
-    glm::vec2 m_position;
+    glm::vec3 m_position;
     glm::vec3 m_color;
     glm::vec2 m_tex_coords;
 
@@ -75,7 +76,7 @@ struct Vertex
 
         attribute_descriptions[0].binding = 0;
         attribute_descriptions[0].location = 0;
-        attribute_descriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+        attribute_descriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
         attribute_descriptions[0].offset = offsetof(Vertex, m_position);
 
         attribute_descriptions[1].binding = 0;
@@ -104,16 +105,26 @@ const std::vector<const char*> DeviceExtensions =
 
 const std::vector<Vertex> Vertices =
 {
-    { { -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
-    { { -0.5f,  0.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
-    { {  0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
-    { {  0.5f, -0.5f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } }
+    // First square.
+    { { -0.5f, 0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
+    { { -0.5f, 0.0f,  0.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
+    { {  0.5f, 0.0f,  0.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
+    { {  0.5f, 0.0f, -0.5f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } },
+
+    // Second square.
+    { { -0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
+    { { -0.5f, -0.5f,  0.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
+    { {  0.5f, -0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
+    { {  0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } }
 };
 
 const std::vector<std::uint16_t> Indices =
 {
-    0, 1, 2,
-    2, 3, 0
+    // First square.
+    0, 1, 2,  2, 3, 0,
+
+    // Second square.
+    4, 5, 6,  6, 7, 4
 };
 
 #define EXPECT_VK_SUCCESS(expression) \
@@ -171,6 +182,10 @@ class HelloTriangleApplication
 
     VkCommandPool                   m_command_pool;
     VkCommandPool                   m_transient_command_pool;
+
+    VkImage                         m_depth_image;
+    VkDeviceMemory                  m_depth_image_memory;
+    VkImageView                     m_depth_image_view;
 
     VkBuffer                        m_vertex_buffer;
     VkDeviceMemory                  m_vertex_buffer_memory;
@@ -244,9 +259,11 @@ class HelloTriangleApplication
         create_vk_render_pass();
         create_vk_descriptor_set_layout();
         create_vk_graphics_pipeline();
-        create_vk_framebuffers();
 
         create_vk_command_pools();
+
+        create_vk_depth_resources();
+        create_vk_framebuffers();
 
         create_vk_vertex_buffer();
         create_vk_index_buffer();
@@ -446,7 +463,9 @@ class HelloTriangleApplication
         }
     };
 
-    QueueFamilyIndices find_vk_queue_families(VkPhysicalDevice physical_device) const
+    static QueueFamilyIndices find_vk_queue_families(
+        const VkPhysicalDevice  physical_device,
+        const VkSurfaceKHR      surface)
     {
         QueueFamilyIndices indices;
 
@@ -464,7 +483,7 @@ class HelloTriangleApplication
                 indices.m_graphics_family = i;
 
             VkBool32 is_present_supported = false;
-            if (vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, m_surface, &is_present_supported) != VK_SUCCESS)
+            if (vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, surface, &is_present_supported) != VK_SUCCESS)
                 throw std::runtime_error("Failed to query Vulkan device surface support");
 
             if (queue_family.queueCount > 0 && is_present_supported)
@@ -500,25 +519,27 @@ class HelloTriangleApplication
         std::vector<VkPresentModeKHR>   m_present_modes;
     };
 
-    SwapChainSupportDetails query_vk_swap_chain_support(VkPhysicalDevice physical_device) const
+    static SwapChainSupportDetails query_vk_swap_chain_support(
+        const VkPhysicalDevice  physical_device,
+        const VkSurfaceKHR      surface)
     {
         SwapChainSupportDetails details;
 
-        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, m_surface, &details.m_capabilities);
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &details.m_capabilities);
 
         std::uint32_t format_count;
-        vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, m_surface, &format_count, nullptr);
+        vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, nullptr);
 
         if (format_count > 0)
         {
             details.m_formats.resize(format_count);
-            vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, m_surface, &format_count, details.m_formats.data());
+            vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, details.m_formats.data());
         }
 
         std::uint32_t present_mode_count;
         vkGetPhysicalDeviceSurfacePresentModesKHR(
             physical_device,
-            m_surface,
+            surface,
             &present_mode_count,
             nullptr);
 
@@ -527,7 +548,7 @@ class HelloTriangleApplication
             details.m_present_modes.resize(present_mode_count);
             vkGetPhysicalDeviceSurfacePresentModesKHR(
                 physical_device,
-                m_surface,
+                surface,
                 &present_mode_count,
                 details.m_present_modes.data());
         }
@@ -602,16 +623,18 @@ class HelloTriangleApplication
         return actual_extent;
     }
 
-    bool is_vk_device_suitable(VkPhysicalDevice physical_device) const
+    static bool is_vk_device_suitable(
+        const VkPhysicalDevice  physical_device,
+        const VkSurfaceKHR      surface)
     {
-        const QueueFamilyIndices indices = find_vk_queue_families(physical_device);
+        const QueueFamilyIndices indices = find_vk_queue_families(physical_device, surface);
 
         const bool extensions_supported = check_vk_device_extension_support(physical_device);
 
         bool swap_chain_adequate = false;
         if (extensions_supported)
         {
-            const SwapChainSupportDetails swap_chain_support = query_vk_swap_chain_support(physical_device);
+            const SwapChainSupportDetails swap_chain_support = query_vk_swap_chain_support(physical_device, surface);
             swap_chain_adequate = !swap_chain_support.m_formats.empty() && !swap_chain_support.m_present_modes.empty();
         }
 
@@ -653,7 +676,7 @@ class HelloTriangleApplication
         m_physical_device = VK_NULL_HANDLE;
         for (const VkPhysicalDevice& device : devices)
         {
-            if (is_vk_device_suitable(device))
+            if (is_vk_device_suitable(device, m_surface))
             {
                 m_physical_device = device;
                 break;
@@ -668,7 +691,7 @@ class HelloTriangleApplication
     {
         std::cout << "Creating Vulkan logical device..." << std::endl;
 
-        const QueueFamilyIndices indices = find_vk_queue_families(m_physical_device);
+        const QueueFamilyIndices indices = find_vk_queue_families(m_physical_device, m_surface);
         assert(indices.is_complete());
 
         float queue_priority = 1.0f;
@@ -722,7 +745,8 @@ class HelloTriangleApplication
     {
         std::cout << "Creating Vulkan swap chain..." << std::endl;
 
-        const SwapChainSupportDetails swap_chain_support = query_vk_swap_chain_support(m_physical_device);
+        const SwapChainSupportDetails swap_chain_support =
+            query_vk_swap_chain_support(m_physical_device, m_surface);
 
         const VkSurfaceFormatKHR surface_format = choose_vk_swap_surface_format(swap_chain_support.m_formats);
         const VkPresentModeKHR present_mode = choose_vk_swap_present_mode(swap_chain_support.m_present_modes);
@@ -732,7 +756,7 @@ class HelloTriangleApplication
         if (swap_chain_support.m_capabilities.maxImageCount > 0)
             image_count = std::min(image_count, swap_chain_support.m_capabilities.maxImageCount);
 
-        const QueueFamilyIndices indices = find_vk_queue_families(m_physical_device);
+        const QueueFamilyIndices indices = find_vk_queue_families(m_physical_device, m_surface);
         assert(indices.is_complete());
 
         const std::uint32_t queue_family_indices[] =
@@ -788,7 +812,11 @@ class HelloTriangleApplication
         for (std::size_t i = 0; i < m_swap_chain_images.size(); ++i)
         {
             m_swap_chain_image_views[i] =
-                vku_create_image_view(m_device, m_swap_chain_images[i], m_swap_chain_surface_format);
+                vku_create_image_view(
+                    m_device,
+                    m_swap_chain_images[i],
+                    m_swap_chain_surface_format,
+                    VK_IMAGE_ASPECT_COLOR_BIT);
         }
     }
 
@@ -837,12 +865,27 @@ class HelloTriangleApplication
 
         VkAttachmentReference color_attachment_ref = {};
         color_attachment_ref.attachment = 0;
-        color_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        color_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // TODO: why not VK_IMAGE_LAYOUT_PRESENT_SRC_KHR?
+
+        VkAttachmentDescription depth_attachment = {};
+        depth_attachment.format = vku_find_depth_format(m_physical_device);
+        depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        depth_attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference depth_attachment_ref = {};
+        depth_attachment_ref.attachment = 1;
+        depth_attachment_ref.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
         VkSubpassDescription subpass = {};
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &color_attachment_ref;
+        subpass.pDepthStencilAttachment = &depth_attachment_ref;
 
         VkSubpassDependency dependency = {};
         dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
@@ -852,10 +895,16 @@ class HelloTriangleApplication
         dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
+        const std::array<VkAttachmentDescription, 2> attachments =
+        {
+            color_attachment,
+            depth_attachment
+        };
+
         VkRenderPassCreateInfo render_pass_create_info = {};
         render_pass_create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        render_pass_create_info.attachmentCount = 1;
-        render_pass_create_info.pAttachments = &color_attachment;
+        render_pass_create_info.attachmentCount = static_cast<std::uint32_t>(attachments.size());
+        render_pass_create_info.pAttachments = attachments.data();
         render_pass_create_info.subpassCount = 1;
         render_pass_create_info.pSubpasses = &subpass;
         render_pass_create_info.dependencyCount = 1;
@@ -982,6 +1031,18 @@ class HelloTriangleApplication
         multisampling.alphaToCoverageEnable = VK_FALSE;
         multisampling.alphaToOneEnable = VK_FALSE;
 
+        VkPipelineDepthStencilStateCreateInfo depth_stencil = {};
+        depth_stencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depth_stencil.depthTestEnable = VK_TRUE;
+        depth_stencil.depthWriteEnable = VK_TRUE;
+        depth_stencil.depthCompareOp = VK_COMPARE_OP_LESS;
+        depth_stencil.depthBoundsTestEnable = VK_FALSE;
+        depth_stencil.minDepthBounds = 0.0f;
+        depth_stencil.maxDepthBounds = 1.0f;
+        depth_stencil.stencilTestEnable = VK_FALSE;
+        depth_stencil.front = {};
+        depth_stencil.back = {};
+
         VkPipelineColorBlendAttachmentState color_blend_attachment = {};
         color_blend_attachment.colorWriteMask =
             VK_COLOR_COMPONENT_R_BIT |
@@ -1026,7 +1087,7 @@ class HelloTriangleApplication
         pipeline_create_info.pViewportState = &viewport_state;
         pipeline_create_info.pRasterizationState = &rasterizer;
         pipeline_create_info.pMultisampleState = &multisampling;
-        pipeline_create_info.pDepthStencilState = nullptr;
+        pipeline_create_info.pDepthStencilState = &depth_stencil;
         pipeline_create_info.pColorBlendState = &color_blending;
         pipeline_create_info.pDynamicState = nullptr;
         pipeline_create_info.layout = m_pipeline_layout;
@@ -1042,33 +1103,9 @@ class HelloTriangleApplication
         vkDestroyShaderModule(m_device, vert_shader_module, nullptr);
     }
 
-    void create_vk_framebuffers()
-    {
-        std::cout << "Creating Vulkan framebuffers..." << std::endl;
-
-        m_swap_chain_framebuffers.resize(m_swap_chain_image_views.size());
-
-        for (std::size_t i = 0; i < m_swap_chain_image_views.size(); ++i)
-        {
-            const VkImageView attachments[] = { m_swap_chain_image_views[i] };
-
-            VkFramebufferCreateInfo framebuffer_create_info = {};
-            framebuffer_create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-            framebuffer_create_info.renderPass = m_render_pass;
-            framebuffer_create_info.attachmentCount = 1;
-            framebuffer_create_info.pAttachments = attachments;
-            framebuffer_create_info.width = m_swap_chain_extent.width;
-            framebuffer_create_info.height = m_swap_chain_extent.height;
-            framebuffer_create_info.layers = 1;
-
-            if (vkCreateFramebuffer(m_device, &framebuffer_create_info, nullptr, &m_swap_chain_framebuffers[i]) != VK_SUCCESS)
-                throw std::runtime_error("Failed to create Vulkan framebuffer");
-        }
-    }
-
     void create_vk_command_pool(const VkCommandPoolCreateFlags flags, VkCommandPool& command_pool)
     {
-        const QueueFamilyIndices queue_family_indices = find_vk_queue_families(m_physical_device);
+        const QueueFamilyIndices queue_family_indices = find_vk_queue_families(m_physical_device, m_surface);
 
         VkCommandPoolCreateInfo pool_create_info = {};
         pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -1087,108 +1124,65 @@ class HelloTriangleApplication
         create_vk_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, m_transient_command_pool);
     }
 
-    void create_vk_texture_image()
+    void create_vk_depth_resources()
     {
-        int tex_width, tex_height, tex_channels;
-        stbi_uc* texels =
-            stbi_load("textures/statue.jpg", &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha);
-
-        if (texels == nullptr)
-            throw std::runtime_error("Failed to load texture file");
-
-        const VkDeviceSize texture_size = tex_width * tex_height * 4;
-
-        VkBuffer staging_buffer;
-        VkDeviceMemory staging_buffer_memory;
-
-        vku_create_buffer(
-            m_physical_device,
-            m_device,
-            texture_size,
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            staging_buffer,
-            staging_buffer_memory);
-
-        vku_copy_host_to_device(
-            m_device,
-            staging_buffer_memory,
-            texels,
-            texture_size);
-
-        stbi_image_free(texels);
+        const VkFormat depth_format = vku_find_depth_format(m_physical_device);
 
         vku_create_image(
             m_physical_device,
             m_device,
-            static_cast<std::uint32_t>(tex_width),
-            static_cast<std::uint32_t>(tex_height),
-            VK_FORMAT_R8G8B8A8_UNORM,
+            m_swap_chain_extent.width,
+            m_swap_chain_extent.height,
+            depth_format,
             VK_IMAGE_TILING_OPTIMAL,
-            VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            m_texture_image,
-            m_texture_image_memory);
+            m_depth_image,
+            m_depth_image_memory);
+
+        m_depth_image_view =
+            vku_create_image_view(
+                m_device,
+                m_depth_image,
+                depth_format,
+                VK_IMAGE_ASPECT_DEPTH_BIT);
 
         vku_transition_image_layout(
             m_device,
             m_graphics_queue,
             m_transient_command_pool,
-            m_texture_image,
-            VK_FORMAT_R8G8B8A8_UNORM,
+            m_depth_image,
+            depth_format,
             VK_IMAGE_LAYOUT_UNDEFINED,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-        vku_copy_buffer_to_image(
-            m_device,
-            m_graphics_queue,
-            m_transient_command_pool,
-            m_texture_image,
-            staging_buffer,
-            static_cast<std::uint32_t>(tex_width),
-            static_cast<std::uint32_t>(tex_height));
-
-        vku_transition_image_layout(
-            m_device,
-            m_graphics_queue,
-            m_transient_command_pool,
-            m_texture_image,
-            VK_FORMAT_R8G8B8A8_UNORM,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-        vkDestroyBuffer(m_device, staging_buffer, nullptr);
-        vkFreeMemory(m_device, staging_buffer_memory, nullptr);
+            VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
     }
 
-    void create_vk_texture_image_view()
+    void create_vk_framebuffers()
     {
-        m_texture_image_view =
-            vku_create_image_view(m_device, m_texture_image, VK_FORMAT_R8G8B8A8_UNORM);
-    }
+        std::cout << "Creating Vulkan framebuffers..." << std::endl;
 
-    void create_vk_texture_sampler()
-    {
-        VkSamplerCreateInfo create_info = {};
-        create_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        create_info.magFilter = VK_FILTER_LINEAR;
-        create_info.minFilter = VK_FILTER_LINEAR;
-        create_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        create_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        create_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        create_info.anisotropyEnable = VK_TRUE;
-        create_info.maxAnisotropy = 16;
-        create_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-        create_info.unnormalizedCoordinates = VK_FALSE;
-        create_info.compareEnable = VK_FALSE;
-        create_info.compareOp = VK_COMPARE_OP_ALWAYS;
-        create_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-        create_info.mipLodBias = 0.0f;
-        create_info.minLod = 0.0f;
-        create_info.maxLod = 0.0f;
+        m_swap_chain_framebuffers.resize(m_swap_chain_image_views.size());
 
-        if (vkCreateSampler(m_device, &create_info, nullptr, &m_texture_sampler) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create Vulkan sampler");
+        for (std::size_t i = 0; i < m_swap_chain_image_views.size(); ++i)
+        {
+            const std::array<VkImageView, 2> attachments =
+            {
+                m_swap_chain_image_views[i],
+                m_depth_image_view
+            };
+
+            VkFramebufferCreateInfo framebuffer_create_info = {};
+            framebuffer_create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            framebuffer_create_info.renderPass = m_render_pass;
+            framebuffer_create_info.attachmentCount = static_cast<std::uint32_t>(attachments.size());
+            framebuffer_create_info.pAttachments = attachments.data();
+            framebuffer_create_info.width = m_swap_chain_extent.width;
+            framebuffer_create_info.height = m_swap_chain_extent.height;
+            framebuffer_create_info.layers = 1;
+
+            if (vkCreateFramebuffer(m_device, &framebuffer_create_info, nullptr, &m_swap_chain_framebuffers[i]) != VK_SUCCESS)
+                throw std::runtime_error("Failed to create Vulkan framebuffer");
+        }
     }
 
     void create_vk_vertex_buffer()
@@ -1301,6 +1295,114 @@ class HelloTriangleApplication
         }
     }
 
+    void create_vk_texture_image()
+    {
+        int tex_width, tex_height, tex_channels;
+        stbi_uc* texels =
+            stbi_load("textures/statue.jpg", &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha);
+
+        if (texels == nullptr)
+            throw std::runtime_error("Failed to load texture file");
+
+        const VkDeviceSize texture_size = tex_width * tex_height * 4;
+
+        VkBuffer staging_buffer;
+        VkDeviceMemory staging_buffer_memory;
+
+        vku_create_buffer(
+            m_physical_device,
+            m_device,
+            texture_size,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            staging_buffer,
+            staging_buffer_memory);
+
+        vku_copy_host_to_device(
+            m_device,
+            staging_buffer_memory,
+            texels,
+            texture_size);
+
+        stbi_image_free(texels);
+
+        vku_create_image(
+            m_physical_device,
+            m_device,
+            static_cast<std::uint32_t>(tex_width),
+            static_cast<std::uint32_t>(tex_height),
+            VK_FORMAT_R8G8B8A8_UNORM,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            m_texture_image,
+            m_texture_image_memory);
+
+        vku_transition_image_layout(
+            m_device,
+            m_graphics_queue,
+            m_transient_command_pool,
+            m_texture_image,
+            VK_FORMAT_R8G8B8A8_UNORM,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+        vku_copy_buffer_to_image(
+            m_device,
+            m_graphics_queue,
+            m_transient_command_pool,
+            m_texture_image,
+            staging_buffer,
+            static_cast<std::uint32_t>(tex_width),
+            static_cast<std::uint32_t>(tex_height));
+
+        vku_transition_image_layout(
+            m_device,
+            m_graphics_queue,
+            m_transient_command_pool,
+            m_texture_image,
+            VK_FORMAT_R8G8B8A8_UNORM,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        vkDestroyBuffer(m_device, staging_buffer, nullptr);
+        vkFreeMemory(m_device, staging_buffer_memory, nullptr);
+    }
+
+    void create_vk_texture_image_view()
+    {
+        m_texture_image_view =
+            vku_create_image_view(
+                m_device,
+                m_texture_image,
+                VK_FORMAT_R8G8B8A8_UNORM,
+                VK_IMAGE_ASPECT_COLOR_BIT);
+    }
+
+    void create_vk_texture_sampler()
+    {
+        VkSamplerCreateInfo create_info = {};
+        create_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        create_info.magFilter = VK_FILTER_LINEAR;
+        create_info.minFilter = VK_FILTER_LINEAR;
+        create_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        create_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        create_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        create_info.anisotropyEnable = VK_TRUE;
+        create_info.maxAnisotropy = 16;
+        create_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        create_info.unnormalizedCoordinates = VK_FALSE;
+        create_info.compareEnable = VK_FALSE;
+        create_info.compareOp = VK_COMPARE_OP_ALWAYS;
+        create_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        create_info.mipLodBias = 0.0f;
+        create_info.minLod = 0.0f;
+        create_info.maxLod = 0.0f;
+
+        if (vkCreateSampler(m_device, &create_info, nullptr, &m_texture_sampler) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create Vulkan sampler");
+    }
+
     void create_vk_descriptor_pool()
     {
         std::array<VkDescriptorPoolSize, 2> pool_sizes = {};
@@ -1393,7 +1495,9 @@ class HelloTriangleApplication
             if (vkBeginCommandBuffer(m_command_buffers[i], &begin_info) != VK_SUCCESS)
                 throw std::runtime_error("Failed to begin recording Vulkan command buffer");
 
-            const VkClearValue clear_color = { 0.0f, 0.0f, 0.0f, 1.0f };
+            std::array<VkClearValue, 2> clear_values;
+            clear_values[0].color = { 0.0f, 0.0f, 0.0f, 1.0f };
+            clear_values[1].depthStencil = { 1.0f, 0 };
 
             VkRenderPassBeginInfo render_pass_begin_info = {};
             render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1401,8 +1505,8 @@ class HelloTriangleApplication
             render_pass_begin_info.framebuffer = m_swap_chain_framebuffers[i];
             render_pass_begin_info.renderArea.offset = { 0, 0 };
             render_pass_begin_info.renderArea.extent = m_swap_chain_extent;
-            render_pass_begin_info.clearValueCount = 1;
-            render_pass_begin_info.pClearValues = &clear_color;
+            render_pass_begin_info.clearValueCount = static_cast<std::uint32_t>(clear_values.size());
+            render_pass_begin_info.pClearValues = clear_values.data();
 
             vkCmdBeginRenderPass(m_command_buffers[i], &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -1583,7 +1687,7 @@ class HelloTriangleApplication
             glm::vec3(0.0f, 1.0f, 0.0f));       // axis
         ubo.m_view = glm::lookAt(
             glm::vec3(1.0f, 1.0f, 1.0f),        // eye
-            glm::vec3(0.0f, 0.0f, 0.0f),        // center
+            glm::vec3(0.0f, -0.4f, 0.0f),       // center
             glm::vec3(0.0f, 1.0f, 0.0f));       // up
         ubo.m_proj = glm::perspective(
             glm::radians(45.0f),                // vertical FOV
@@ -1625,15 +1729,23 @@ class HelloTriangleApplication
 
         create_vk_swap_chain();
         create_vk_swap_chain_image_views();
+
         create_vk_render_pass();
         create_vk_graphics_pipeline();
+
+        create_vk_depth_resources();
         create_vk_framebuffers();
+
         create_vk_command_buffers();
     }
 
     void cleanup_vk_swap_chain()
     {
         std::cout << "Cleaning up Vulkan swap chain..." << std::endl;
+
+        vkDestroyImageView(m_device, m_depth_image_view, nullptr);
+        vkDestroyImage(m_device, m_depth_image, nullptr);
+        vkFreeMemory(m_device, m_depth_image_memory, nullptr);
 
         for (const VkFramebuffer framebuffer : m_swap_chain_framebuffers)
             vkDestroyFramebuffer(m_device, framebuffer, nullptr);
@@ -1663,6 +1775,7 @@ class HelloTriangleApplication
         cleanup_vk_swap_chain();
 
         vkDestroySampler(m_device, m_texture_sampler, nullptr);
+
         vkDestroyImageView(m_device, m_texture_image_view, nullptr);
         vkDestroyImage(m_device, m_texture_image, nullptr);
         vkFreeMemory(m_device, m_texture_image_memory, nullptr);

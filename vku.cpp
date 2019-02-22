@@ -22,6 +22,49 @@ std::uint32_t vku_find_memory_type(
     throw std::runtime_error("Failed to find suitable Vulkan memory type");
 }
 
+VkFormat vku_find_supported_format(
+    const VkPhysicalDevice          physical_device,
+    const std::vector<VkFormat>&    candidates,
+    const VkImageTiling             tiling,
+    const VkFormatFeatureFlags      features)
+{
+    for (const VkFormat format : candidates)
+    {
+        VkFormatProperties props;
+        vkGetPhysicalDeviceFormatProperties(physical_device, format, &props);
+
+        if (tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features)
+            return format;
+        else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.optimalTilingFeatures & features) == features)
+            return format;
+    }
+
+    throw std::runtime_error("Failed to find a suitable Vulkan format");
+}
+
+VkFormat vku_find_depth_format(
+    const VkPhysicalDevice          physical_device)
+{
+    return
+        vku_find_supported_format(
+            physical_device,
+            {
+                VK_FORMAT_D32_SFLOAT,
+                VK_FORMAT_D32_SFLOAT_S8_UINT,
+                VK_FORMAT_D24_UNORM_S8_UINT,
+            },
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+}
+
+bool vku_has_stencil_component(
+    const VkFormat                  format)
+{
+    return
+        format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+        format == VK_FORMAT_D24_UNORM_S8_UINT;
+}
+
 void vku_allocate_command_buffers(
     const VkDevice                  device,
     const VkCommandPool             command_pool,
@@ -121,7 +164,8 @@ void vku_create_image(
 VkImageView vku_create_image_view(
     const VkDevice                  device,
     const VkImage                   image,
-    const VkFormat                  format)
+    const VkFormat                  format,
+    const VkImageAspectFlags        aspect_flags)
 {
     VkImageView image_view;
 
@@ -130,7 +174,7 @@ VkImageView vku_create_image_view(
     create_info.image = image;
     create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
     create_info.format = format;
-    create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    create_info.subresourceRange.aspectMask = aspect_flags;
     create_info.subresourceRange.baseMipLevel = 0;
     create_info.subresourceRange.levelCount = 1;
     create_info.subresourceRange.baseArrayLayer = 0;
@@ -263,7 +307,16 @@ void vku_transition_image_layout(
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = image;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+    if (new_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+    {
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+        if (vku_has_stencil_component(format))
+            barrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    }
+    else barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
     barrier.subresourceRange.baseMipLevel = 0;
     barrier.subresourceRange.levelCount = 1;
     barrier.subresourceRange.baseArrayLayer = 0;
@@ -289,6 +342,14 @@ void vku_transition_image_layout(
         barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
         source_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         destination_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    }
+    else if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
+             new_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+    {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        source_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destination_stage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     }
     else throw std::runtime_error("Unsupported Vulkan layout transition");
 

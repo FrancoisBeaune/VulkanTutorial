@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 #include <vulkan/vulkan.h>
 
@@ -8,6 +9,18 @@ std::uint32_t vku_find_memory_type(
     const VkPhysicalDevice          physical_device,
     const std::uint32_t             type_filter,
     const VkMemoryPropertyFlags     properties);
+
+VkFormat vku_find_supported_format(
+    const VkPhysicalDevice          physical_device,
+    const std::vector<VkFormat>&    candidates,
+    const VkImageTiling             tiling,
+    const VkFormatFeatureFlags      features);
+
+VkFormat vku_find_depth_format(
+    const VkPhysicalDevice          physical_device);
+
+bool vku_has_stencil_component(
+    const VkFormat                  format);
 
 void vku_create_buffer(
     const VkPhysicalDevice          physical_device,
@@ -33,7 +46,8 @@ void vku_create_image(
 VkImageView vku_create_image_view(
     const VkDevice                  device,
     const VkImage                   image,
-    const VkFormat                  format);
+    const VkFormat                  format,
+    const VkImageAspectFlags        aspect_flags);
 
 void vku_allocate_command_buffers(
     const VkDevice                  device,
