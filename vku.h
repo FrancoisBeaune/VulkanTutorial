@@ -30,6 +30,11 @@ void vku_create_image(
     VkImage&                        image,
     VkDeviceMemory&                 image_memory);
 
+VkImageView vku_create_image_view(
+    const VkDevice                  device,
+    const VkImage                   image,
+    const VkFormat                  format);
+
 void vku_allocate_command_buffers(
     const VkDevice                  device,
     const VkCommandPool             command_pool,

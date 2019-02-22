@@ -118,6 +118,30 @@ void vku_create_image(
         throw std::runtime_error("Failed to bind Vulkan image memory to buffer");
 }
 
+VkImageView vku_create_image_view(
+    const VkDevice                  device,
+    const VkImage                   image,
+    const VkFormat                  format)
+{
+    VkImageView image_view;
+
+    VkImageViewCreateInfo create_info = {};
+    create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    create_info.image = image;
+    create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    create_info.format = format;
+    create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    create_info.subresourceRange.baseMipLevel = 0;
+    create_info.subresourceRange.levelCount = 1;
+    create_info.subresourceRange.baseArrayLayer = 0;
+    create_info.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(device, &create_info, nullptr, &image_view) != VK_SUCCESS)
+        throw std::runtime_error("Failed to create Vulkan image view");
+
+    return image_view;
+}
+
 VkCommandBuffer vku_begin_single_time_commands(
     const VkDevice                  device,
     const VkCommandPool             command_pool)

@@ -50,6 +50,7 @@ struct Vertex
 {
     glm::vec2 m_position;
     glm::vec3 m_color;
+    glm::vec2 m_tex_coords;
 
     static VkVertexInputBindingDescription get_binding_description()
     {
@@ -60,9 +61,9 @@ struct Vertex
         return binding_description;
     }
 
-    static std::array<VkVertexInputAttributeDescription, 2> get_attribute_descriptions()
+    static std::array<VkVertexInputAttributeDescription, 3> get_attribute_descriptions()
     {
-        std::array<VkVertexInputAttributeDescription, 2> attribute_descriptions = {};
+        std::array<VkVertexInputAttributeDescription, 3> attribute_descriptions = {};
 
         attribute_descriptions[0].binding = 0;
         attribute_descriptions[0].location = 0;
@@ -73,6 +74,11 @@ struct Vertex
         attribute_descriptions[1].location = 1;
         attribute_descriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
         attribute_descriptions[1].offset = offsetof(Vertex, m_color);
+
+        attribute_descriptions[2].binding = 0;
+        attribute_descriptions[2].location = 2;
+        attribute_descriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+        attribute_descriptions[2].offset = offsetof(Vertex, m_tex_coords);
 
         return attribute_descriptions;
     }
@@ -90,10 +96,10 @@ const std::vector<const char*> DeviceExtensions =
 
 const std::vector<Vertex> Vertices =
 {
-    { { -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
-    { {  0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f } },
-    { {  0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } },
-    { { -0.5f,  0.5f }, { 1.0f, 1.0f, 1.0f } }
+    { { -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
+    { { -0.5f,  0.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
+    { {  0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
+    { {  0.5f, -0.5f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } }
 };
 
 const std::vector<std::uint16_t> Indices =
@@ -162,12 +168,13 @@ class HelloTriangleApplication
     VkDeviceMemory                  m_vertex_buffer_memory;
     VkBuffer                        m_index_buffer;
     VkDeviceMemory                  m_index_buffer_memory;
-
     std::vector<VkBuffer>           m_uniform_buffers;
     std::vector<VkDeviceMemory>     m_uniform_buffers_memory;
 
     VkImage                         m_texture_image;
     VkDeviceMemory                  m_texture_image_memory;
+    VkImageView                     m_texture_image_view;
+    VkSampler                       m_texture_sampler;
 
     VkDescriptorPool                m_descriptor_pool;
     std::vector<VkDescriptorSet>    m_descriptor_sets;
@@ -206,24 +213,36 @@ class HelloTriangleApplication
 
         query_vk_instance_extensions();
         create_vk_instance();
+
         setup_vk_debug_messenger();
         create_vk_surface();
+
         pick_vk_physical_device();
         create_vk_logical_device();
+
         create_vk_swap_chain();
         create_vk_swap_chain_image_views();
+
         create_vk_render_pass();
         create_vk_descriptor_set_layout();
         create_vk_graphics_pipeline();
         create_vk_framebuffers();
+
         create_vk_command_pools();
-        create_vk_texture_image();
+
         create_vk_vertex_buffer();
         create_vk_index_buffer();
         create_vk_uniform_buffers();
+
+        create_vk_texture_image();
+        create_vk_texture_image_view();
+        create_vk_texture_sampler();
+
         create_vk_descriptor_pool();
         create_vk_descriptor_sets();
+
         create_vk_command_buffers();
+
         create_vk_sync_objects();
     }
 
@@ -561,7 +580,7 @@ class HelloTriangleApplication
         return actual_extent;
     }
 
-    bool is_vk_device_suitable(VkPhysicalDevice physical_device)
+    bool is_vk_device_suitable(VkPhysicalDevice physical_device) const
     {
         const QueueFamilyIndices indices = find_vk_queue_families(physical_device);
 
@@ -574,7 +593,14 @@ class HelloTriangleApplication
             swap_chain_adequate = !swap_chain_support.m_formats.empty() && !swap_chain_support.m_present_modes.empty();
         }
 
-        return indices.is_complete() && extensions_supported && swap_chain_adequate;
+        VkPhysicalDeviceFeatures supported_features;
+        vkGetPhysicalDeviceFeatures(physical_device, &supported_features);
+
+        return
+            indices.is_complete() &&
+            extensions_supported &&
+            swap_chain_adequate &&
+            supported_features.samplerAnisotropy;
     }
 
     void pick_vk_physical_device()
@@ -642,7 +668,8 @@ class HelloTriangleApplication
             queue_create_infos.push_back(queue_create_info);
         }
 
-        VkPhysicalDeviceFeatures device_features = {};
+        VkPhysicalDeviceFeatures physical_device_features = {};
+        physical_device_features.samplerAnisotropy = VK_TRUE;
 
         VkDeviceCreateInfo device_create_info = {};
         device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -660,7 +687,7 @@ class HelloTriangleApplication
         }
         device_create_info.enabledExtensionCount = static_cast<std::uint32_t>(DeviceExtensions.size());
         device_create_info.ppEnabledExtensionNames = DeviceExtensions.data();
-        device_create_info.pEnabledFeatures = &device_features;
+        device_create_info.pEnabledFeatures = &physical_device_features;
 
         if (vkCreateDevice(m_physical_device, &device_create_info, nullptr, &m_device) != VK_SUCCESS)
             throw std::runtime_error("Failed to create Vulkan logical device");
@@ -738,23 +765,8 @@ class HelloTriangleApplication
 
         for (std::size_t i = 0; i < m_swap_chain_images.size(); ++i)
         {
-            VkImageViewCreateInfo create_info = {};
-            create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            create_info.image = m_swap_chain_images[i];
-            create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            create_info.format = m_swap_chain_surface_format;
-            create_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-            create_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-            create_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-            create_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-            create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            create_info.subresourceRange.baseMipLevel = 0;
-            create_info.subresourceRange.levelCount = 1;
-            create_info.subresourceRange.baseArrayLayer = 0;
-            create_info.subresourceRange.layerCount = 1;
-
-            if (vkCreateImageView(m_device, &create_info, nullptr, &m_swap_chain_image_views[i]) != VK_SUCCESS)
-                throw std::runtime_error("Failed to create Vulkan image views");
+            m_swap_chain_image_views[i] =
+                vku_create_image_view(m_device, m_swap_chain_images[i], m_swap_chain_surface_format);
         }
     }
 
@@ -842,10 +854,23 @@ class HelloTriangleApplication
         ubo_layout_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         ubo_layout_binding.pImmutableSamplers = nullptr;
 
+        VkDescriptorSetLayoutBinding sampler_layout_binding = {};
+        sampler_layout_binding.binding = 1;
+        sampler_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        sampler_layout_binding.descriptorCount = 1;
+        sampler_layout_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        sampler_layout_binding.pImmutableSamplers = nullptr;
+
+        const std::array<VkDescriptorSetLayoutBinding, 2> bindings =
+        {
+            ubo_layout_binding,
+            sampler_layout_binding
+        };
+
         VkDescriptorSetLayoutCreateInfo create_info = {};
         create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        create_info.bindingCount = 1;
-        create_info.pBindings = &ubo_layout_binding;
+        create_info.bindingCount = static_cast<std::uint32_t>(bindings.size());
+        create_info.pBindings = bindings.data();
 
         if (vkCreateDescriptorSetLayout(m_device, &create_info, nullptr, &m_descriptor_set_layout) != VK_SUCCESS)
             throw std::runtime_error("Failed to create Vulkan descriptor set layout");
@@ -1114,6 +1139,36 @@ class HelloTriangleApplication
         vkFreeMemory(m_device, staging_buffer_memory, nullptr);
     }
 
+    void create_vk_texture_image_view()
+    {
+        m_texture_image_view =
+            vku_create_image_view(m_device, m_texture_image, VK_FORMAT_R8G8B8A8_UNORM);
+    }
+
+    void create_vk_texture_sampler()
+    {
+        VkSamplerCreateInfo create_info = {};
+        create_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        create_info.magFilter = VK_FILTER_LINEAR;
+        create_info.minFilter = VK_FILTER_LINEAR;
+        create_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        create_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        create_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        create_info.anisotropyEnable = VK_TRUE;
+        create_info.maxAnisotropy = 16;
+        create_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        create_info.unnormalizedCoordinates = VK_FALSE;
+        create_info.compareEnable = VK_FALSE;
+        create_info.compareOp = VK_COMPARE_OP_ALWAYS;
+        create_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        create_info.mipLodBias = 0.0f;
+        create_info.minLod = 0.0f;
+        create_info.maxLod = 0.0f;
+
+        if (vkCreateSampler(m_device, &create_info, nullptr, &m_texture_sampler) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create Vulkan sampler");
+    }
+
     void create_vk_vertex_buffer()
     {
         std::cout << "Creating Vulkan vertex buffer..." << std::endl;
@@ -1226,14 +1281,18 @@ class HelloTriangleApplication
 
     void create_vk_descriptor_pool()
     {
-        VkDescriptorPoolSize pool_size = {};
-        pool_size.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        pool_size.descriptorCount = static_cast<std::uint32_t>(m_swap_chain_images.size());
+        std::array<VkDescriptorPoolSize, 2> pool_sizes = {};
+
+        pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        pool_sizes[0].descriptorCount = static_cast<std::uint32_t>(m_swap_chain_images.size());
+
+        pool_sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        pool_sizes[1].descriptorCount = static_cast<std::uint32_t>(m_swap_chain_images.size());
 
         VkDescriptorPoolCreateInfo create_info = {};
         create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        create_info.poolSizeCount = 1;
-        create_info.pPoolSizes = &pool_size;
+        create_info.poolSizeCount = static_cast<std::uint32_t>(pool_sizes.size());
+        create_info.pPoolSizes = pool_sizes.data();
         create_info.maxSets = static_cast<std::uint32_t>(m_swap_chain_images.size());
 
         if (vkCreateDescriptorPool(m_device, &create_info, nullptr, &m_descriptor_pool) != VK_SUCCESS)
@@ -1261,15 +1320,35 @@ class HelloTriangleApplication
             buffer_info.offset = 0;
             buffer_info.range = sizeof(UniformBufferObject);
 
-            VkWriteDescriptorSet descriptor_write = {};
-            descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptor_write.dstSet = m_descriptor_sets[i];
-            descriptor_write.dstBinding = 0;
-            descriptor_write.dstArrayElement = 0;
-            descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            descriptor_write.descriptorCount = 1;
-            descriptor_write.pBufferInfo = &buffer_info;
-            vkUpdateDescriptorSets(m_device, 1, &descriptor_write, 0, nullptr);
+            VkDescriptorImageInfo image_info = {};
+            image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            image_info.imageView = m_texture_image_view;
+            image_info.sampler = m_texture_sampler;
+
+            std::array<VkWriteDescriptorSet, 2> descriptor_writes = {};
+
+            descriptor_writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptor_writes[0].dstSet = m_descriptor_sets[i];
+            descriptor_writes[0].dstBinding = 0;
+            descriptor_writes[0].dstArrayElement = 0;
+            descriptor_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptor_writes[0].descriptorCount = 1;
+            descriptor_writes[0].pBufferInfo = &buffer_info;
+
+            descriptor_writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptor_writes[1].dstSet = m_descriptor_sets[i];
+            descriptor_writes[1].dstBinding = 1;
+            descriptor_writes[1].dstArrayElement = 0;
+            descriptor_writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptor_writes[1].descriptorCount = 1;
+            descriptor_writes[1].pImageInfo = &image_info;
+
+            vkUpdateDescriptorSets(
+                m_device,
+                static_cast<std::uint32_t>(descriptor_writes.size()),
+                descriptor_writes.data(),
+                0,
+                nullptr);
         }
     }
 
@@ -1527,6 +1606,8 @@ class HelloTriangleApplication
 
         cleanup_vk_swap_chain();
 
+        vkDestroySampler(m_device, m_texture_sampler, nullptr);
+        vkDestroyImageView(m_device, m_texture_image_view, nullptr);
         vkDestroyImage(m_device, m_texture_image, nullptr);
         vkFreeMemory(m_device, m_texture_image_memory, nullptr);
 
