@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <cstddef>
@@ -20,6 +21,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #define GLFW_INCLUDE_VULKAN
@@ -29,9 +31,15 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#define FORCE_VSYNC
+
 const int WindowWidth = 800;
 const int WindowHeight = 600;
 const std::size_t MaxFramesInFlight = 2;
+
+#ifndef FORCE_VSYNC
+const std::size_t RenderFrameRate = 120; // Hz
+#endif
 
 #ifdef NDEBUG
 const bool EnableVkValidationLayers = false;
@@ -185,7 +193,10 @@ class HelloTriangleApplication
     std::vector<VkSemaphore>        m_render_finished_semaphores;
     std::vector<VkFence>            m_in_flight_fences;
 
-    bool                            m_framebuffer_resized = false;
+    std::atomic<bool>               m_framebuffer_resized = false;
+
+    // "Game state".
+    float                           m_rotation_angle = 0.0f;
 
     void create_window()
     {
@@ -197,6 +208,7 @@ class HelloTriangleApplication
 
         glfwSetWindowUserPointer(m_window, this);
         glfwSetFramebufferSizeCallback(m_window, framebuffer_resize_callback);
+        glfwSetKeyCallback(m_window, key_callback);
     }
 
     static void framebuffer_resize_callback(GLFWwindow* window, const int width, const int height)
@@ -205,6 +217,12 @@ class HelloTriangleApplication
             reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
 
         app->m_framebuffer_resized = true;
+    }
+
+    static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+    {
+        if (action == GLFW_PRESS && key == GLFW_KEY_ESCAPE)
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
     }
 
     void init_vulkan()
@@ -538,6 +556,9 @@ class HelloTriangleApplication
 
     static VkPresentModeKHR choose_vk_swap_present_mode(const std::vector<VkPresentModeKHR>& available_modes)
     {
+#ifdef FORCE_VSYNC
+        return VK_PRESENT_MODE_FIFO_KHR;
+#else
         VkPresentModeKHR best_mode = VK_PRESENT_MODE_FIFO_KHR;
 
         for (const VkPresentModeKHR& mode : available_modes)
@@ -549,6 +570,7 @@ class HelloTriangleApplication
         }
 
         return best_mode;
+#endif
     }
 
     VkExtent2D choose_vk_swap_extent(const VkSurfaceCapabilitiesKHR& capabilities)
@@ -1439,14 +1461,53 @@ class HelloTriangleApplication
     {
         std::cout << "Entering main loop..." << std::endl;
 
-        std::size_t current_frame = 0;
+        std::atomic<bool> stop = false;
+        std::thread render_thread([this, &stop]()
+        {
+            std::cout << "Starting render thread..." << std::endl;
+
+            const auto game_begin_time = std::chrono::high_resolution_clock::now();
+            std::size_t current_frame = 0;
+
+            while (!stop)
+            {
+                const auto frame_begin_time = std::chrono::high_resolution_clock::now();
+
+                // "Game update".
+                const float total_elapsed_time = std::chrono::duration<float, std::chrono::seconds::period>(frame_begin_time - game_begin_time).count();
+                m_rotation_angle = total_elapsed_time * glm::radians(20.0f);
+
+                // "Game render".
+                draw_frame(current_frame);
+                current_frame = (current_frame + 1) % MaxFramesInFlight;
+
+#ifndef FORCE_VSYNC
+                // Compute time spent rendering this frame.
+                const float frame_time =
+                    std::chrono::duration<float, std::chrono::seconds::period>(
+                        std::chrono::high_resolution_clock::now() - frame_begin_time).count();
+
+                // Sleep time until next frame.
+                const float target_frame_time = 1.0f / RenderFrameRate;
+                const float sleep_time = target_frame_time - frame_time;
+                if (sleep_time > 0.0f)
+                {
+                    const auto sleep_time_us = static_cast<std::uint64_t>(sleep_time * 1000000.0f);
+                    std::this_thread::sleep_for(std::chrono::microseconds(sleep_time_us));
+                }
+#endif
+            }
+
+            std::cout << "Ending render thread..." << std::endl;
+        });
 
         while (!glfwWindowShouldClose(m_window))
         {
-            glfwPollEvents();
-            draw_frame(current_frame);
-            current_frame = (current_frame + 1) % MaxFramesInFlight;
+            glfwWaitEvents();
         }
+
+        stop = true;
+        render_thread.join();
     }
 
     void draw_frame(const std::size_t current_frame)
@@ -1512,21 +1573,16 @@ class HelloTriangleApplication
             throw std::runtime_error("Failed to present Vulkan swap chain image");
     }
 
-    void update_vk_uniform_buffer(const std::uint32_t current_image)
+    void update_vk_uniform_buffer(const std::size_t image_index)
     {
-        static auto start_time = std::chrono::high_resolution_clock::now();
-
-        const auto current_time = std::chrono::high_resolution_clock::now();
-        const float time = std::chrono::duration<float, std::chrono::seconds::period>(current_time - start_time).count();
-
         // Note: we're using the Y-up convention.
         UniformBufferObject ubo;
         ubo.m_model = glm::rotate(
             glm::mat4(1.0f),                    // initial transform
-            time * glm::radians(90.0f),         // angle
+            m_rotation_angle,                   // angle
             glm::vec3(0.0f, 1.0f, 0.0f));       // axis
         ubo.m_view = glm::lookAt(
-            glm::vec3(2.0f, 2.0f, 2.0f),        // eye
+            glm::vec3(1.0f, 1.0f, 1.0f),        // eye
             glm::vec3(0.0f, 0.0f, 0.0f),        // center
             glm::vec3(0.0f, 1.0f, 0.0f));       // up
         ubo.m_proj = glm::perspective(
@@ -1540,7 +1596,7 @@ class HelloTriangleApplication
 
         vku_copy_host_to_device(
             m_device,
-            m_uniform_buffers_memory[current_image],
+            m_uniform_buffers_memory[image_index],
             &ubo,
             static_cast<VkDeviceSize>(sizeof(ubo)));
     }
