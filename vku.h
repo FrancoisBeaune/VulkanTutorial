@@ -36,6 +36,7 @@ void vku_create_image(
     const VkDevice                  device,
     const std::uint32_t             width,
     const std::uint32_t             height,
+    const std::uint32_t             mip_levels,
     const VkFormat                  format,
     const VkImageTiling             tiling,
     const VkImageUsageFlags         usage,
@@ -46,6 +47,7 @@ void vku_create_image(
 VkImageView vku_create_image_view(
     const VkDevice                  device,
     const VkImage                   image,
+    const std::uint32_t             mip_levels,
     const VkFormat                  format,
     const VkImageAspectFlags        aspect_flags);
 
@@ -93,6 +95,7 @@ void vku_transition_image_layout(
     const VkQueue                   queue,
     const VkCommandPool             command_pool,
     const VkImage                   image,
+    const std::uint32_t             mip_levels,
     const VkFormat                  format,
     const VkImageLayout             old_layout,
     const VkImageLayout             new_layout);

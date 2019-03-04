@@ -120,6 +120,7 @@ void vku_create_image(
     const VkDevice                  device,
     const std::uint32_t             width,
     const std::uint32_t             height,
+    const std::uint32_t             mip_levels,
     const VkFormat                  format,
     const VkImageTiling             tiling,
     const VkImageUsageFlags         usage,
@@ -134,7 +135,7 @@ void vku_create_image(
     create_info.extent.width = width;
     create_info.extent.height = height;
     create_info.extent.depth = 1;
-    create_info.mipLevels = 1;
+    create_info.mipLevels = mip_levels;
     create_info.arrayLayers = 1;
     create_info.samples = VK_SAMPLE_COUNT_1_BIT;
     create_info.tiling = tiling;
@@ -164,6 +165,7 @@ void vku_create_image(
 VkImageView vku_create_image_view(
     const VkDevice                  device,
     const VkImage                   image,
+    const std::uint32_t             mip_levels,
     const VkFormat                  format,
     const VkImageAspectFlags        aspect_flags)
 {
@@ -176,7 +178,7 @@ VkImageView vku_create_image_view(
     create_info.format = format;
     create_info.subresourceRange.aspectMask = aspect_flags;
     create_info.subresourceRange.baseMipLevel = 0;
-    create_info.subresourceRange.levelCount = 1;
+    create_info.subresourceRange.levelCount = mip_levels;
     create_info.subresourceRange.baseArrayLayer = 0;
     create_info.subresourceRange.layerCount = 1;
 
@@ -293,6 +295,7 @@ void vku_transition_image_layout(
     const VkQueue                   queue,
     const VkCommandPool             command_pool,
     const VkImage                   image,
+    const std::uint32_t             mip_levels,
     const VkFormat                  format,
     const VkImageLayout             old_layout,
     const VkImageLayout             new_layout)
@@ -318,7 +321,7 @@ void vku_transition_image_layout(
     else barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
     barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.levelCount = mip_levels;
     barrier.subresourceRange.baseArrayLayer = 0;
     barrier.subresourceRange.layerCount = 1;
     barrier.srcAccessMask = 0;
