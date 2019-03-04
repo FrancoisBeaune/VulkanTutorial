@@ -37,6 +37,7 @@ void vku_create_image(
     const std::uint32_t             width,
     const std::uint32_t             height,
     const std::uint32_t             mip_levels,
+    const VkSampleCountFlagBits     samples,
     const VkFormat                  format,
     const VkImageTiling             tiling,
     const VkImageUsageFlags         usage,

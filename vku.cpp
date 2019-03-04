@@ -121,6 +121,7 @@ void vku_create_image(
     const std::uint32_t             width,
     const std::uint32_t             height,
     const std::uint32_t             mip_levels,
+    const VkSampleCountFlagBits     samples,
     const VkFormat                  format,
     const VkImageTiling             tiling,
     const VkImageUsageFlags         usage,
@@ -137,7 +138,7 @@ void vku_create_image(
     create_info.extent.depth = 1;
     create_info.mipLevels = mip_levels;
     create_info.arrayLayers = 1;
-    create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    create_info.samples = samples;
     create_info.tiling = tiling;
     create_info.usage = usage;
     create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -353,6 +354,14 @@ void vku_transition_image_layout(
         barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         source_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
         destination_stage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    }
+    else if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
+             new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+    {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        source_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destination_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     }
     else throw std::runtime_error("Unsupported Vulkan layout transition");
 
