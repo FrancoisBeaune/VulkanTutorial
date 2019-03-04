@@ -25,15 +25,18 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#define GLM_ENABLE_EXPERIMENTAL
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/hash.hpp>
 
 #define FORCE_VSYNC
 
@@ -97,7 +100,68 @@ struct Vertex
 
         return attribute_descriptions;
     }
+
+    bool operator==(const Vertex& rhs) const
+    {
+        return
+            m_position == rhs.m_position &&
+            m_tex_coords == rhs.m_tex_coords &&
+            m_color == rhs.m_color;
+    }
 };
+
+//
+// Derivation of the 0x9E3779B97F4A7C17u constant:
+//
+//   #include <cmath>
+//   #include <cstdint>
+//   #include <ios>
+//   #include <iostream>
+//   
+//   int main()
+//   {
+//       const long double num = std::pow(2.0l, 64.0l);
+//       const long double phi = 1.61803398874989484820459l;   // (1 + sqrt(5)) / 2
+//       const long double x = num / phi;
+//       const std::uint64_t y = static_cast<std::uint64_t>(x);
+//       const std::uint64_t z = (y % 2 == 0) ? y + 1 : y;
+//       std::cout << "0x" << std::hex << std::uppercase << z << "u" << std::endl;
+//   }
+//
+// Run with a compiler that implements 'long double' with at least 80 bits (i.e. not Visual C++).
+//
+
+std::size_t combine_hashes(
+    const std::size_t h1,
+    const std::size_t h2)
+{
+    // Inspired by boost::hash_combine(): https://www.boost.org/doc/libs/1_69_0/doc/html/hash/combine.html
+    return h1 ^ (h2 + 0x9E3779B97F4A7C17u + (h1 << 6) + (h1 >> 2));
+}
+
+std::size_t combine_hashes(
+    const std::size_t h1,
+    const std::size_t h2,
+    const std::size_t h3)
+{
+    return combine_hashes(combine_hashes(h1, h2), h3);
+}
+
+namespace std
+{
+    template <>
+    struct hash<Vertex>
+    {
+        size_t operator()(const Vertex& vertex) const
+        {
+            return
+                combine_hashes(
+                    hash<glm::vec3>()(vertex.m_position),
+                    hash<glm::vec2>()(vertex.m_tex_coords),
+                    hash<glm::vec3>()(vertex.m_color));
+        }
+    };
+}
 
 const std::vector<const char*> ValidationLayers =
 {
@@ -1172,6 +1236,8 @@ class HelloTriangleApplication
 
     void load_model()
     {
+        std::cout << "Loading " << ModelPath << "..." << std::endl;
+
         tinyobj::attrib_t attrib;
         std::vector<tinyobj::shape_t> shapes;
         std::vector<tinyobj::material_t> materials;
@@ -1179,6 +1245,10 @@ class HelloTriangleApplication
 
         if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, ModelPath.c_str()))
             throw std::runtime_error(warn + err);
+
+        std::cout << "    Initial vertex count: " << attrib.vertices.size() << std::endl;
+
+        std::unordered_map<Vertex, std::uint32_t> unique_vertices;
 
         for (const auto& shape : shapes)
         {
@@ -1198,10 +1268,22 @@ class HelloTriangleApplication
                 };
                 vertex.m_color = { 1.0f, 1.0f, 1.0f };
 
-                m_vertices.push_back(vertex);
-                m_indices.push_back(static_cast<std::uint32_t>(m_indices.size()));
+                std::uint32_t vertex_index;
+                const auto vertex_it = unique_vertices.find(vertex);
+                if (vertex_it != std::cend(unique_vertices))
+                    vertex_index = vertex_it->second;
+                else
+                {
+                    vertex_index = static_cast<std::uint32_t>(m_vertices.size());
+                    m_vertices.push_back(vertex);
+                    unique_vertices.insert(std::make_pair(vertex, vertex_index));
+                }
+
+                m_indices.push_back(vertex_index);
             }
         }
+
+        std::cout << "    Optimized vertex count: " << m_vertices.size() << std::endl;
     }
 
     void create_vk_vertex_buffer()
@@ -1316,6 +1398,8 @@ class HelloTriangleApplication
 
     void create_vk_texture_image()
     {
+        std::cout << "Loading " << TexturePath << "..." << std::endl;
+
         int tex_width, tex_height, tex_channels;
         stbi_uc* texels = stbi_load(TexturePath.c_str(), &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha);
 
