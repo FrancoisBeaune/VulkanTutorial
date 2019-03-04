@@ -8,6 +8,9 @@
     <Filter Include="shaders">
       <UniqueIdentifier>{f234b9ea-3cef-4d5e-b021-85cab23b735b}</UniqueIdentifier>
     </Filter>
+    <Filter Include="3rdparty">
+      <UniqueIdentifier>{6ce61cb4-6e26-404c-975c-7919527fa098}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="shaders\shader.frag">
@@ -18,7 +21,12 @@
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="stb_image.h" />
     <ClInclude Include="vku.h" />
+    <ClInclude Include="stb_image.h">
+      <Filter>3rdparty</Filter>
+    </ClInclude>
+    <ClInclude Include="tiny_obj_loader.h">
+      <Filter>3rdparty</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

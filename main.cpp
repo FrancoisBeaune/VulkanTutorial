@@ -3,6 +3,9 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "tiny_obj_loader.h"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -38,6 +41,9 @@ const int WindowWidth = 800;
 const int WindowHeight = 600;
 const std::size_t MaxFramesInFlight = 2;
 
+const std::string ModelPath = "models/chalet.obj";
+const std::string TexturePath = "textures/chalet.jpg";
+
 #ifndef FORCE_VSYNC
 const std::size_t RenderFrameRate = 120; // Hz
 #endif
@@ -58,8 +64,8 @@ struct UniformBufferObject
 struct Vertex
 {
     glm::vec3 m_position;
-    glm::vec3 m_color;
     glm::vec2 m_tex_coords;
+    glm::vec3 m_color;
 
     static VkVertexInputBindingDescription get_binding_description()
     {
@@ -79,15 +85,15 @@ struct Vertex
         attribute_descriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
         attribute_descriptions[0].offset = offsetof(Vertex, m_position);
 
-        attribute_descriptions[1].binding = 0;
-        attribute_descriptions[1].location = 1;
-        attribute_descriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attribute_descriptions[1].offset = offsetof(Vertex, m_color);
-
         attribute_descriptions[2].binding = 0;
-        attribute_descriptions[2].location = 2;
+        attribute_descriptions[2].location = 1;
         attribute_descriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
         attribute_descriptions[2].offset = offsetof(Vertex, m_tex_coords);
+
+        attribute_descriptions[1].binding = 0;
+        attribute_descriptions[1].location = 2;
+        attribute_descriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attribute_descriptions[1].offset = offsetof(Vertex, m_color);
 
         return attribute_descriptions;
     }
@@ -101,30 +107,6 @@ const std::vector<const char*> ValidationLayers =
 const std::vector<const char*> DeviceExtensions =
 {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
-};
-
-const std::vector<Vertex> Vertices =
-{
-    // First square.
-    { { -0.5f, 0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
-    { { -0.5f, 0.0f,  0.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
-    { {  0.5f, 0.0f,  0.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
-    { {  0.5f, 0.0f, -0.5f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } },
-
-    // Second square.
-    { { -0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f }, { 1.0f, 0.0f } },
-    { { -0.5f, -0.5f,  0.5f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f } },
-    { {  0.5f, -0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f } },
-    { {  0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f } }
-};
-
-const std::vector<std::uint16_t> Indices =
-{
-    // First square.
-    0, 1, 2,  2, 3, 0,
-
-    // Second square.
-    4, 5, 6,  6, 7, 4
 };
 
 #define EXPECT_VK_SUCCESS(expression) \
@@ -187,6 +169,8 @@ class HelloTriangleApplication
     VkDeviceMemory                  m_depth_image_memory;
     VkImageView                     m_depth_image_view;
 
+    std::vector<Vertex>             m_vertices;
+    std::vector<std::uint32_t>      m_indices;
     VkBuffer                        m_vertex_buffer;
     VkDeviceMemory                  m_vertex_buffer_memory;
     VkBuffer                        m_index_buffer;
@@ -265,6 +249,7 @@ class HelloTriangleApplication
         create_vk_depth_resources();
         create_vk_framebuffers();
 
+        load_model();
         create_vk_vertex_buffer();
         create_vk_index_buffer();
         create_vk_uniform_buffers();
@@ -1185,11 +1170,45 @@ class HelloTriangleApplication
         }
     }
 
+    void load_model()
+    {
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warn, err;
+
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, ModelPath.c_str()))
+            throw std::runtime_error(warn + err);
+
+        for (const auto& shape : shapes)
+        {
+            for (const auto& index : shape.mesh.indices)
+            {
+                Vertex vertex;
+                vertex.m_position =
+                {
+                    attrib.vertices[3 * index.vertex_index + 0],
+                    attrib.vertices[3 * index.vertex_index + 1],
+                    attrib.vertices[3 * index.vertex_index + 2]
+                };
+                vertex.m_tex_coords =
+                {
+                    attrib.texcoords[2 * index.texcoord_index + 0],
+                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+                };
+                vertex.m_color = { 1.0f, 1.0f, 1.0f };
+
+                m_vertices.push_back(vertex);
+                m_indices.push_back(static_cast<std::uint32_t>(m_indices.size()));
+            }
+        }
+    }
+
     void create_vk_vertex_buffer()
     {
         std::cout << "Creating Vulkan vertex buffer..." << std::endl;
 
-        const VkDeviceSize buffer_size = sizeof(Vertices[0]) * Vertices.size();
+        const VkDeviceSize buffer_size = sizeof(m_vertices[0]) * m_vertices.size();
 
         VkBuffer staging_buffer;
         VkDeviceMemory staging_buffer_memory;
@@ -1205,7 +1224,7 @@ class HelloTriangleApplication
         vku_copy_host_to_device(
             m_device,
             staging_buffer_memory,
-            Vertices.data(),
+            m_vertices.data(),
             buffer_size);
 
         vku_create_buffer(
@@ -1233,7 +1252,7 @@ class HelloTriangleApplication
     {
         std::cout << "Creating Vulkan index buffer..." << std::endl;
 
-        const VkDeviceSize buffer_size = sizeof(Indices[0]) * Indices.size();
+        const VkDeviceSize buffer_size = sizeof(m_indices[0]) * m_indices.size();
 
         VkBuffer staging_buffer;
         VkDeviceMemory staging_buffer_memory;
@@ -1249,7 +1268,7 @@ class HelloTriangleApplication
         void* data;
         if (vkMapMemory(m_device, staging_buffer_memory, 0, buffer_size, 0, &data) != VK_SUCCESS)
             throw std::runtime_error("Failed to map Vulkan buffer memory to host address space");
-        std::memcpy(data, Indices.data(), static_cast<std::size_t>(buffer_size));
+        std::memcpy(data, m_indices.data(), static_cast<std::size_t>(buffer_size));
         vkUnmapMemory(m_device, staging_buffer_memory);
 
         vku_create_buffer(
@@ -1298,8 +1317,7 @@ class HelloTriangleApplication
     void create_vk_texture_image()
     {
         int tex_width, tex_height, tex_channels;
-        stbi_uc* texels =
-            stbi_load("textures/statue.jpg", &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha);
+        stbi_uc* texels = stbi_load(TexturePath.c_str(), &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha);
 
         if (texels == nullptr)
             throw std::runtime_error("Failed to load texture file");
@@ -1516,7 +1534,7 @@ class HelloTriangleApplication
             const VkDeviceSize offsets[] = { 0 };
             vkCmdBindVertexBuffers(m_command_buffers[i], 0, 1, vertex_buffers, offsets);
 
-            vkCmdBindIndexBuffer(m_command_buffers[i], m_index_buffer, 0, VK_INDEX_TYPE_UINT16);
+            vkCmdBindIndexBuffer(m_command_buffers[i], m_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
             vkCmdBindDescriptorSets(
                 m_command_buffers[i],
@@ -1528,7 +1546,7 @@ class HelloTriangleApplication
                 0,
                 nullptr);
 
-            vkCmdDrawIndexed(m_command_buffers[i], static_cast<std::uint32_t>(Indices.size()), 1, 0, 0, 0);
+            vkCmdDrawIndexed(m_command_buffers[i], static_cast<std::uint32_t>(m_indices.size()), 1, 0, 0, 0);
 
             vkCmdEndRenderPass(m_command_buffers[i]);
 
@@ -1686,8 +1704,8 @@ class HelloTriangleApplication
             m_rotation_angle,                   // angle
             glm::vec3(0.0f, 1.0f, 0.0f));       // axis
         ubo.m_view = glm::lookAt(
-            glm::vec3(1.0f, 1.0f, 1.0f),        // eye
-            glm::vec3(0.0f, -0.4f, 0.0f),       // center
+            glm::vec3(2.0f, 1.5f, 2.0f),        // eye
+            glm::vec3(0.0f, 0.2f, 0.0f),        // center
             glm::vec3(0.0f, 1.0f, 0.0f));       // up
         ubo.m_proj = glm::perspective(
             glm::radians(45.0f),                // vertical FOV
