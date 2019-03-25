@@ -12,6 +12,12 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
 
+// NVIDIA Vulkan Ray Tracing helpers.
+#include "nv_helpers_vk/BottomLevelASGenerator.h"
+#include "nv_helpers_vk/DescriptorSetGenerator.h"
+#include "nv_helpers_vk/TopLevelASGenerator.h"
+#include "nv_helpers_vk/VKHelpers.h"
+
 #include "vku.h"
 
 #include <algorithm>
@@ -114,6 +120,33 @@ struct Vertex
     }
 };
 
+struct Material
+{
+    glm::vec3 m_diffuse;
+};
+
+struct GeometryInstance
+{
+    VkBuffer        m_vertex_buffer;
+    std::uint32_t   m_vertex_count;
+    VkDeviceSize    m_vertex_offset;
+    VkBuffer        m_index_buffer;
+    std::uint32_t   m_index_count;
+    VkDeviceSize    m_index_offset;
+    glm::mat4x4     m_transform;
+};
+
+struct AccelerationStructure
+{
+    VkBuffer                    m_scratch_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory              m_scratch_mem = VK_NULL_HANDLE;
+    VkBuffer                    m_result_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory              m_result_mem = VK_NULL_HANDLE;
+    VkBuffer                    m_instances_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory              m_instances_mem = VK_NULL_HANDLE;
+    VkAccelerationStructureNV   m_structure = VK_NULL_HANDLE;
+};
+
 //
 // Derivation of the 0x9E3779B97F4A7C17u constant:
 //
@@ -174,7 +207,16 @@ const std::vector<const char*> ValidationLayers =
 
 const std::vector<const char*> DeviceExtensions =
 {
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,          // TODO: required for Vulkan RT?
+    VK_KHR_MAINTENANCE3_EXTENSION_NAME,                 // TODO: required for Vulkan RT?
+    VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+    VK_NV_RAY_TRACING_EXTENSION_NAME
+};
+
+const std::vector<const char*> InstanceExtensions =
+{
+    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
 };
 
 #define EXPECT_VK_SUCCESS(expression) \
@@ -206,71 +248,86 @@ class HelloTriangleApplication
     }
 
   private:
-    GLFWwindow*                     m_window;
+    GLFWwindow*                             m_window;
 
-    VkInstance                      m_instance;
-    VkDebugUtilsMessengerEXT        m_debug_messenger;
-    VkSurfaceKHR                    m_surface;
+    VkInstance                              m_instance;
+    VkDebugUtilsMessengerEXT                m_debug_messenger;
+    VkSurfaceKHR                            m_surface;
 
-    VkPhysicalDevice                m_physical_device;
-    VkSampleCountFlagBits           m_msaa_samples = VK_SAMPLE_COUNT_1_BIT;
+    VkPhysicalDevice                        m_physical_device;
+    VkSampleCountFlagBits                   m_msaa_samples = VK_SAMPLE_COUNT_1_BIT;
+    VkPhysicalDeviceRayTracingPropertiesNV  m_phsical_device_rt_props;
 
-    VkDevice                        m_device;
+    VkDevice                                m_device;
 
-    VkQueue                         m_graphics_queue;
-    VkQueue                         m_present_queue;
+    VkQueue                                 m_graphics_queue;
+    VkQueue                                 m_present_queue;
 
-    VkSwapchainKHR                  m_swap_chain;
-    VkFormat                        m_swap_chain_surface_format;
-    VkExtent2D                      m_swap_chain_extent;
-    std::vector<VkImage>            m_swap_chain_images;
-    std::vector<VkImageView>        m_swap_chain_image_views;
-    std::vector<VkFramebuffer>      m_swap_chain_framebuffers;
+    VkSwapchainKHR                          m_swap_chain;
+    VkFormat                                m_swap_chain_surface_format;
+    VkExtent2D                              m_swap_chain_extent;
+    std::vector<VkImage>                    m_swap_chain_images;
+    std::vector<VkImageView>                m_swap_chain_image_views;
+    std::vector<VkFramebuffer>              m_swap_chain_framebuffers;
 
-    VkRenderPass                    m_render_pass;
-    VkDescriptorSetLayout           m_descriptor_set_layout;
-    VkPipelineLayout                m_pipeline_layout;
-    VkPipeline                      m_graphics_pipeline;
+    VkRenderPass                            m_render_pass;
+    VkDescriptorSetLayout                   m_descriptor_set_layout;
+    VkPipelineLayout                        m_pipeline_layout;
+    VkPipeline                              m_graphics_pipeline;
 
-    VkCommandPool                   m_command_pool;
-    VkCommandPool                   m_transient_command_pool;
+    VkCommandPool                           m_command_pool;
+    VkCommandPool                           m_transient_command_pool;
 
-    VkImage                         m_color_image;
-    VkDeviceMemory                  m_color_image_memory;
-    VkImageView                     m_color_image_view;
+    VkImage                                 m_color_image;
+    VkDeviceMemory                          m_color_image_memory;
+    VkImageView                             m_color_image_view;
 
-    VkImage                         m_depth_image;
-    VkDeviceMemory                  m_depth_image_memory;
-    VkImageView                     m_depth_image_view;
+    VkImage                                 m_depth_image;
+    VkDeviceMemory                          m_depth_image_memory;
+    VkImageView                             m_depth_image_view;
 
-    std::vector<Vertex>             m_vertices;
-    std::vector<std::uint32_t>      m_indices;
-    VkBuffer                        m_vertex_buffer;
-    VkDeviceMemory                  m_vertex_buffer_memory;
-    VkBuffer                        m_index_buffer;
-    VkDeviceMemory                  m_index_buffer_memory;
-    std::vector<VkBuffer>           m_uniform_buffers;
-    std::vector<VkDeviceMemory>     m_uniform_buffers_memory;
+    std::vector<Vertex>                     m_vertices;
+    std::vector<std::uint32_t>              m_indices;
+    std::vector<Material>                   m_materials;
 
-    std::uint32_t                   m_texture_mip_levels;
-    VkImage                         m_texture_image;
-    VkDeviceMemory                  m_texture_image_memory;
-    VkImageView                     m_texture_image_view;
-    VkSampler                       m_texture_sampler;
+    VkBuffer                                m_vertex_buffer;
+    VkDeviceMemory                          m_vertex_buffer_memory;
+    VkBuffer                                m_index_buffer;
+    VkDeviceMemory                          m_index_buffer_memory;
+    VkBuffer                                m_material_buffer;
+    VkDeviceMemory                          m_material_buffer_memory;
+    std::vector<VkBuffer>                   m_uniform_buffers;
+    std::vector<VkDeviceMemory>             m_uniform_buffers_memory;
 
-    VkDescriptorPool                m_descriptor_pool;
-    std::vector<VkDescriptorSet>    m_descriptor_sets;
+    // Vulkan Ray Tracing.
+    nv_helpers_vk::TopLevelASGenerator      m_rt_top_level_as_gen;
+    AccelerationStructure                   m_rt_top_level_as;
+    VkImage                                 m_rt_output_image;
+    VkDeviceMemory                          m_rt_output_image_memory;
+    VkImageView                             m_rt_output_image_view;
+    VkDescriptorPool                        m_rt_descriptor_pool;
+    VkDescriptorSetLayout                   m_rt_descriptor_set_layout;
+    VkDescriptorSet                         m_rt_descriptor_set;
 
-    std::vector<VkCommandBuffer>    m_command_buffers;
+    std::uint32_t                           m_texture_mip_levels;
+    VkImage                                 m_texture_image;
+    VkDeviceMemory                          m_texture_image_memory;
+    VkImageView                             m_texture_image_view;
+    VkSampler                               m_texture_sampler;
 
-    std::vector<VkSemaphore>        m_image_available_semaphores;
-    std::vector<VkSemaphore>        m_render_finished_semaphores;
-    std::vector<VkFence>            m_in_flight_fences;
+    VkDescriptorPool                        m_descriptor_pool;
+    std::vector<VkDescriptorSet>            m_descriptor_sets;
 
-    std::atomic<bool>               m_framebuffer_resized = false;
+    std::vector<VkCommandBuffer>            m_command_buffers;
+
+    std::vector<VkSemaphore>                m_image_available_semaphores;
+    std::vector<VkSemaphore>                m_render_finished_semaphores;
+    std::vector<VkFence>                    m_in_flight_fences;
+
+    std::atomic<bool>                       m_framebuffer_resized = false;
 
     // "Game state".
-    float                           m_rotation_angle = 0.0f;
+    float                                   m_rotation_angle = 0.0f;
 
     void create_window()
     {
@@ -303,7 +360,7 @@ class HelloTriangleApplication
     {
         std::cout << "Initializing Vulkan..." << std::endl;
 
-        query_vk_instance_extensions();
+        print_vk_instance_extensions();
         create_vk_instance();
 
         setup_vk_debug_messenger();
@@ -326,13 +383,20 @@ class HelloTriangleApplication
         create_vk_framebuffers();
 
         load_model();
+
         create_vk_vertex_buffer();
         create_vk_index_buffer();
+        create_vk_material_buffer();
         create_vk_uniform_buffers();
 
         create_vk_texture_image();
         create_vk_texture_image_view();
         create_vk_texture_sampler();
+
+        // Vulkan Ray Tracing.
+        create_vk_rt_acceleration_structures();
+        create_vk_rt_raytracing_output();
+        create_vk_rt_descriptor_set();
 
         create_vk_descriptor_pool();
         create_vk_descriptor_sets();
@@ -342,10 +406,8 @@ class HelloTriangleApplication
         create_vk_sync_objects();
     }
 
-    static void query_vk_instance_extensions()
+    static void print_vk_instance_extensions()
     {
-        std::cout << "Querying Vulkan instance extensions..." << std::endl;
-
         std::uint32_t extension_count;
         if (vkEnumerateInstanceExtensionProperties(nullptr, &extension_count, nullptr) != VK_SUCCESS)
             throw std::runtime_error("Failed to enumerate Vulkan instance extensions");
@@ -355,7 +417,7 @@ class HelloTriangleApplication
 
         if (extension_count > 0)
         {
-            std::cout << extension_count << " instance extension(s) found:" << std::endl;
+            std::cout << extension_count << " Vulkan instance extension(s) found:" << std::endl;
             for (const VkExtensionProperties& ext : extension_props)
             {
                 std::cout << "    " << ext.extensionName << " (version " << ext.specVersion
@@ -403,6 +465,8 @@ class HelloTriangleApplication
 
         if (EnableVkValidationLayers)
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+
+        extensions.insert(std::end(extensions), std::cbegin(InstanceExtensions), std::cend(InstanceExtensions));
 
         return extensions;
     }
@@ -743,7 +807,7 @@ class HelloTriangleApplication
         std::vector<VkPhysicalDevice> devices(device_count);
         EXPECT_VK_SUCCESS(vkEnumeratePhysicalDevices(m_instance, &device_count, devices.data()));
 
-        std::cout << device_count << " device(s) found:" << std::endl;
+        std::cout << device_count << " Vulkan physical device(s) found:" << std::endl;
 
         for (const VkPhysicalDevice& device : devices)
         {
@@ -752,6 +816,23 @@ class HelloTriangleApplication
 
             std::cout << "    " << device_props.deviceName << " (driver version: "
                 << make_version_string(device_props.driverVersion) << ")" << std::endl;
+
+            std::uint32_t extension_count;
+            vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, nullptr);
+
+            std::vector<VkExtensionProperties> available_extensions(extension_count);
+            vkEnumerateDeviceExtensionProperties(device, nullptr, &extension_count, available_extensions.data());
+
+            if (extension_count > 0)
+            {
+                std::cout << "    " << extension_count << " device extension(s) found:" << std::endl;
+                for (const VkExtensionProperties& ext : available_extensions)
+                {
+                    std::cout << "        " << ext.extensionName << " (version " << ext.specVersion
+                        << ", or " << make_version_string(ext.specVersion) << ")" << std::endl;
+                }
+            }
+            else std::cout << "    No device extension found." << std::endl;
         }
 
         m_physical_device = VK_NULL_HANDLE;
@@ -767,6 +848,14 @@ class HelloTriangleApplication
 
         if (m_physical_device == VK_NULL_HANDLE)
             throw std::runtime_error("Failed to find a suitable Vulkan device");
+
+        m_phsical_device_rt_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PROPERTIES_NV;
+
+        VkPhysicalDeviceProperties2 device_props = {};
+        device_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        device_props.pNext = &m_phsical_device_rt_props;
+
+        vkGetPhysicalDeviceProperties2(m_physical_device, &device_props);
     }
 
     void create_vk_logical_device()
@@ -1051,8 +1140,8 @@ class HelloTriangleApplication
     {
         std::cout << "Creating Vulkan graphics pipeline..." << std::endl;
 
-        const std::vector<char> vert_shader_code = read_file("shaders/vert.spv");
-        const std::vector<char> frag_shader_code = read_file("shaders/frag.spv");
+        const std::vector<char> vert_shader_code = read_file("shaders/basic_vertex_shader.spv");
+        const std::vector<char> frag_shader_code = read_file("shaders/basic_fragment_shader.spv");
 
         const VkShaderModule vert_shader_module = create_vk_shader_module(vert_shader_code);
         const VkShaderModule frag_shader_module = create_vk_shader_module(frag_shader_code);
@@ -1379,6 +1468,10 @@ class HelloTriangleApplication
         }
 
         std::cout << "    Optimized vertex count: " << m_vertices.size() << std::endl;
+
+        Material material;
+        material.m_diffuse = glm::vec3(0.8f, 0.2f, 0.3f);
+        m_materials.push_back(material);
     }
 
     void create_vk_vertex_buffer()
@@ -1404,11 +1497,12 @@ class HelloTriangleApplication
             m_vertices.data(),
             buffer_size);
 
+        // TODO: Vulkan RT requires VK_BUFFER_USAGE_STORAGE_BUFFER_BIT apparently?
         vku_create_buffer(
             m_physical_device,
             m_device,
             buffer_size,
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             m_vertex_buffer,
             m_vertex_buffer_memory);
@@ -1448,11 +1542,12 @@ class HelloTriangleApplication
         std::memcpy(data, m_indices.data(), static_cast<std::size_t>(buffer_size));
         vkUnmapMemory(m_device, staging_buffer_memory);
 
+        // TODO: Vulkan RT requires VK_BUFFER_USAGE_STORAGE_BUFFER_BIT apparently?
         vku_create_buffer(
             m_physical_device,
             m_device,
             buffer_size,
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             m_index_buffer,
             m_index_buffer_memory);
@@ -1462,6 +1557,50 @@ class HelloTriangleApplication
             m_graphics_queue,
             m_transient_command_pool,
             m_index_buffer,
+            staging_buffer,
+            buffer_size);
+
+        vkDestroyBuffer(m_device, staging_buffer, nullptr);
+        vkFreeMemory(m_device, staging_buffer_memory, nullptr);
+    }
+
+    void create_vk_material_buffer()
+    {
+        std::cout << "Creating Vulkan material buffer..." << std::endl;
+
+        const VkDeviceSize buffer_size = sizeof(m_materials[0]) * m_materials.size();
+
+        VkBuffer staging_buffer;
+        VkDeviceMemory staging_buffer_memory;
+        vku_create_buffer(
+            m_physical_device,
+            m_device,
+            buffer_size,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            staging_buffer,
+            staging_buffer_memory);
+
+        vku_copy_host_to_device(
+            m_device,
+            staging_buffer_memory,
+            m_materials.data(),
+            buffer_size);
+
+        vku_create_buffer(
+            m_physical_device,
+            m_device,
+            buffer_size,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            m_material_buffer,
+            m_material_buffer_memory);
+
+        vku_copy_buffer_sync(
+            m_device,
+            m_graphics_queue,
+            m_transient_command_pool,
+            m_material_buffer,
             staging_buffer,
             buffer_size);
 
@@ -1489,6 +1628,332 @@ class HelloTriangleApplication
                 m_uniform_buffers[i],
                 m_uniform_buffers_memory[i]);
         }
+    }
+
+    void create_vk_rt_acceleration_structures()
+    {
+        std::cout << "Creating Vulkan ray tracing acceleration structures..." << std::endl;
+
+        VkCommandBuffer command_buffer =
+            vku_begin_single_time_commands(m_device, m_transient_command_pool);
+
+        const AccelerationStructure bottom_level_as = create_vk_rt_bottom_level_as(command_buffer);
+        m_rt_top_level_as_gen.AddInstance(bottom_level_as.m_structure, glm::mat4x4(1.0f), 0, 0);
+
+        m_rt_top_level_as.m_structure = m_rt_top_level_as_gen.CreateAccelerationStructure(m_device, VK_TRUE);
+
+        VkDeviceSize scratch_size = 0;              // bytes
+        VkDeviceSize result_size = 0;               // bytes
+        VkDeviceSize instance_descs_size = 0;       // bytes
+        m_rt_top_level_as_gen.ComputeASBufferSizes(
+            m_device,
+            m_rt_top_level_as.m_structure,
+            &scratch_size,
+            &result_size,
+            &instance_descs_size);
+
+        // TODO: replace by vku function?
+        nv_helpers_vk::createBuffer(
+            m_physical_device,
+            m_device,
+            scratch_size,
+            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            &m_rt_top_level_as.m_scratch_buffer,
+            &m_rt_top_level_as.m_scratch_mem,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        // TODO: replace by vku function?
+        nv_helpers_vk::createBuffer(
+            m_physical_device,
+            m_device,
+            result_size,
+            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            &m_rt_top_level_as.m_result_buffer,
+            &m_rt_top_level_as.m_result_mem,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        // TODO: replace by vku function?
+        nv_helpers_vk::createBuffer(
+            m_physical_device,
+            m_device,
+            instance_descs_size,
+            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            &m_rt_top_level_as.m_instances_buffer,
+            &m_rt_top_level_as.m_instances_mem,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        m_rt_top_level_as_gen.Generate(
+            m_device,
+            command_buffer,
+            m_rt_top_level_as.m_structure,
+            m_rt_top_level_as.m_scratch_buffer,
+            0,
+            m_rt_top_level_as.m_result_buffer,
+            m_rt_top_level_as.m_result_mem,
+            m_rt_top_level_as.m_instances_buffer,
+            m_rt_top_level_as.m_instances_mem,
+            VK_NULL_HANDLE);    // TODO: pass m_rt_top_level_as.m_structure for update only
+
+        vku_end_single_time_commands(
+            m_device,
+            m_graphics_queue,
+            m_transient_command_pool,
+            command_buffer);
+    }
+
+    void create_vk_rt_raytracing_output()
+    {
+        std::cout << "Creating Vulkan ray tracing output image..." << std::endl;
+
+        vku_create_image(
+            m_physical_device,
+            m_device,
+            m_swap_chain_extent.width,
+            m_swap_chain_extent.height,
+            1,
+            VK_SAMPLE_COUNT_1_BIT,
+            m_swap_chain_surface_format,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            m_rt_output_image,
+            m_rt_output_image_memory);
+
+        // TODO: if there's a problem, check if we need to set create_info.components (RGBA swizzles).
+        m_rt_output_image_view =
+            vku_create_image_view(
+                m_device,
+                m_rt_output_image,
+                1,
+                m_swap_chain_surface_format,
+                VK_IMAGE_ASPECT_COLOR_BIT);
+    }
+
+    void create_vk_rt_descriptor_set()
+    {
+        std::cout << "Creating Vulkan ray tracing descriptor set..." << std::endl;
+
+        //
+        // Make sure data from the vertex and index buffers are present on the GPU.
+        //
+
+        VkCommandBuffer command_buffer =
+            vku_begin_single_time_commands(m_device, m_transient_command_pool);
+
+        VkBufferMemoryBarrier barrier = {};
+        barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.offset = 0;
+        barrier.size = VK_WHOLE_SIZE;
+
+        barrier.buffer = m_vertex_buffer;
+        vkCmdPipelineBarrier(
+            command_buffer,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            0,
+            0, nullptr,
+            1, &barrier,
+            0, nullptr);
+
+        barrier.buffer = m_index_buffer;
+        vkCmdPipelineBarrier(
+            command_buffer,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+            0,
+            0, nullptr,
+            1, &barrier,
+            0, nullptr);
+
+        vku_end_single_time_commands(
+            m_device,
+            m_graphics_queue,
+            m_transient_command_pool,
+            command_buffer);
+
+        //
+        // Create descriptor set.
+        //
+
+        nv_helpers_vk::DescriptorSetGenerator descriptorSetGenerator;
+
+        // Location 0: top-level acceleration structure.
+        descriptorSetGenerator.AddBinding(
+            0,
+            1,
+            VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV,
+            VK_SHADER_STAGE_RAYGEN_BIT_NV);
+
+        // Location 1: ray tracing output image.
+        descriptorSetGenerator.AddBinding(
+            1,
+            1,
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            VK_SHADER_STAGE_RAYGEN_BIT_NV);
+
+        // Location 2: camera information.
+        descriptorSetGenerator.AddBinding(
+            2,
+            1,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_SHADER_STAGE_RAYGEN_BIT_NV);
+
+        // Location 3: vertex buffer.
+        descriptorSetGenerator.AddBinding(
+            3,
+            1,
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,      // TODO: why?
+            VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV);
+
+        // Location 4: index buffer.
+        descriptorSetGenerator.AddBinding(
+            4,
+            1,
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,      // TODO: why?
+            VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV);
+
+        // Location 5: material buffer.
+        descriptorSetGenerator.AddBinding(
+            5,
+            1,
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV);
+
+        // Location 6: textures.
+        descriptorSetGenerator.AddBinding(
+            6,
+            1,  // TODO: number of textures
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV);
+
+        m_rt_descriptor_pool = descriptorSetGenerator.GeneratePool(m_device);
+        m_rt_descriptor_set_layout = descriptorSetGenerator.GenerateLayout(m_device);
+
+        m_rt_descriptor_set =
+            descriptorSetGenerator.GenerateSet(
+                m_device,
+                m_rt_descriptor_pool,
+                m_rt_descriptor_set_layout);
+
+        //
+        // Bind resources.
+        //
+
+        // Bind top-level acceleration structure.
+        VkWriteDescriptorSetAccelerationStructureNV descriptorAccelerationStructureInfo = {};
+        descriptorAccelerationStructureInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_NV;
+        descriptorAccelerationStructureInfo.accelerationStructureCount = 1;
+        descriptorAccelerationStructureInfo.pAccelerationStructures = &m_rt_top_level_as.m_structure;
+        descriptorSetGenerator.Bind(m_rt_descriptor_set, 0, { descriptorAccelerationStructureInfo });
+
+        // Bind ray tracing output image.
+        VkDescriptorImageInfo descriptorOutputImageInfo = {};
+        descriptorOutputImageInfo.sampler = nullptr;
+        descriptorOutputImageInfo.imageView = m_rt_output_image_view;
+        descriptorOutputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        descriptorSetGenerator.Bind(m_rt_descriptor_set, 1, { descriptorOutputImageInfo });
+
+        // Bind camera information.
+        // TODO: which uniform buffer to bind? We have one per swap chain image!
+        VkDescriptorBufferInfo descriptorCameraInfo = {};
+        descriptorCameraInfo.buffer = m_uniform_buffers[0];
+        descriptorCameraInfo.range = sizeof(UniformBufferObject);
+        descriptorSetGenerator.Bind(m_rt_descriptor_set, 2, { descriptorCameraInfo });
+
+        // Bind vertex buffer.
+        VkDescriptorBufferInfo descriptorVertexBufferInfo = {};
+        descriptorVertexBufferInfo.buffer = m_vertex_buffer;
+        descriptorVertexBufferInfo.range = VK_WHOLE_SIZE;
+        descriptorSetGenerator.Bind(m_rt_descriptor_set, 3, { descriptorVertexBufferInfo });
+
+        // Bind index buffer.
+        VkDescriptorBufferInfo descriptorIndexBufferInfo = {};
+        descriptorIndexBufferInfo.buffer = m_index_buffer;
+        descriptorIndexBufferInfo.range = VK_WHOLE_SIZE;
+        descriptorSetGenerator.Bind(m_rt_descriptor_set, 4, { descriptorIndexBufferInfo });
+
+        // Bind material buffer.
+        VkDescriptorBufferInfo descriptorMaterialBufferInfo = {};
+        descriptorMaterialBufferInfo.buffer = m_material_buffer;
+        descriptorMaterialBufferInfo.range = VK_WHOLE_SIZE;
+        descriptorSetGenerator.Bind(m_rt_descriptor_set, 5, { descriptorMaterialBufferInfo });
+
+        // Bind textures.
+        VkDescriptorImageInfo descriptorTextureInfo = {};
+        descriptorTextureInfo.sampler = m_texture_sampler;
+        descriptorTextureInfo.imageView = m_texture_image_view;
+        descriptorTextureInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        descriptorSetGenerator.Bind(m_rt_descriptor_set, 6, { descriptorTextureInfo });
+
+        descriptorSetGenerator.UpdateSetContents(m_device, m_rt_descriptor_set);
+    }
+
+    AccelerationStructure create_vk_rt_bottom_level_as(VkCommandBuffer command_buffer) const
+    {
+        GeometryInstance geometry_instance;
+        geometry_instance.m_vertex_buffer = m_vertex_buffer;
+        geometry_instance.m_vertex_count = static_cast<std::uint32_t>(m_vertices.size());
+        geometry_instance.m_vertex_offset = 0;
+        geometry_instance.m_index_buffer = m_index_buffer;
+        geometry_instance.m_index_count = static_cast<std::uint32_t>(m_indices.size());
+        geometry_instance.m_index_offset = 0;
+        geometry_instance.m_transform = glm::mat4x4(1.0f);
+
+        nv_helpers_vk::BottomLevelASGenerator bottom_level_as_gen;
+        bottom_level_as_gen.AddVertexBuffer(
+            geometry_instance.m_vertex_buffer,
+            geometry_instance.m_vertex_offset,
+            geometry_instance.m_vertex_count,
+            sizeof(Vertex),
+            geometry_instance.m_index_buffer,
+            geometry_instance.m_index_offset,
+            geometry_instance.m_index_count,
+            VK_NULL_HANDLE,
+            0);
+
+        AccelerationStructure bottom_level_as;
+        bottom_level_as.m_structure = bottom_level_as_gen.CreateAccelerationStructure(m_device, VK_FALSE);
+
+        VkDeviceSize scratch_size = 0;  // bytes
+        VkDeviceSize result_size = 0;   // bytes
+        bottom_level_as_gen.ComputeASBufferSizes(m_device, bottom_level_as.m_structure, &scratch_size, &result_size);
+
+        // TODO: replace by vku function?
+        nv_helpers_vk::createBuffer(
+            m_physical_device,
+            m_device,
+            scratch_size,
+            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            &bottom_level_as.m_scratch_buffer,
+            &bottom_level_as.m_scratch_mem,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        // TODO: replace by vku function?
+        nv_helpers_vk::createBuffer(
+            m_physical_device,
+            m_device,
+            result_size,
+            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            &bottom_level_as.m_result_buffer,
+            &bottom_level_as.m_result_mem,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        bottom_level_as_gen.Generate(
+            m_device,
+            command_buffer,
+            bottom_level_as.m_structure,
+            bottom_level_as.m_scratch_buffer,
+            0,
+            bottom_level_as.m_result_buffer,
+            bottom_level_as.m_result_mem,
+            VK_FALSE,
+            VK_NULL_HANDLE);
+
+        return bottom_level_as;
     }
 
     // TODO: move to vku.
@@ -1749,6 +2214,7 @@ class HelloTriangleApplication
         m_descriptor_sets.resize(m_swap_chain_images.size());
 
         const std::vector<VkDescriptorSetLayout> layouts(m_swap_chain_images.size(), m_descriptor_set_layout);
+
         VkDescriptorSetAllocateInfo alloc_info = {};
         alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         alloc_info.descriptorPool = m_descriptor_pool;

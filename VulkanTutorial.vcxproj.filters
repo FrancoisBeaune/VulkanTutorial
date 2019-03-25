@@ -32,14 +32,6 @@
     <Filter Include="3rdparty">
       <UniqueIdentifier>{6ce61cb4-6e26-404c-975c-7919527fa098}</UniqueIdentifier>
     </Filter>
-  </ItemGroup>
-  <ItemGroup>
-    <CustomBuild Include="shaders\shader.frag">
-      <Filter>shaders</Filter>
-    </CustomBuild>
-    <CustomBuild Include="shaders\shader.vert">
-      <Filter>shaders</Filter>
-    </CustomBuild>
     <Filter Include="3rdparty\nv_helpers_vk">
       <UniqueIdentifier>{17b8ec05-77a1-47c3-9bb4-991141679cbd}</UniqueIdentifier>
     </Filter>
@@ -70,5 +62,22 @@
     <ClInclude Include="nv_helpers_vk\VKHelpers.h">
       <Filter>3rdparty\nv_helpers_vk</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <GLSLValidate Include="shaders\basic_vertex_shader.vert">
+      <Filter>shaders</Filter>
+    </GLSLValidate>
+    <GLSLValidate Include="shaders\basic_fragment_shader.frag">
+      <Filter>shaders</Filter>
+    </GLSLValidate>
+    <GLSLValidate Include="shaders\ray_gen.rgen">
+      <Filter>shaders</Filter>
+    </GLSLValidate>
+    <GLSLValidate Include="shaders\ray_miss.rmiss">
+      <Filter>shaders</Filter>
+    </GLSLValidate>
+    <GLSLValidate Include="shaders\ray_closest_hit.rchit">
+      <Filter>shaders</Filter>
+    </GLSLValidate>
   </ItemGroup>
 </Project>
