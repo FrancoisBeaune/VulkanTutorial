@@ -15,6 +15,7 @@
 // NVIDIA Vulkan Ray Tracing helpers.
 #include "nv_helpers_vk/BottomLevelASGenerator.h"
 #include "nv_helpers_vk/DescriptorSetGenerator.h"
+#include "nv_helpers_vk/RaytracingPipelineGenerator.h"
 #include "nv_helpers_vk/TopLevelASGenerator.h"
 #include "nv_helpers_vk/VKHelpers.h"
 
@@ -50,11 +51,11 @@ const int WindowHeight = 600;
 const std::size_t MaxFramesInFlight = 2;
 
 #ifdef NDEBUG
-    const std::string ModelPath = "models/chalet.obj";
-    const std::string TexturePath = "textures/chalet.jpg";
+const std::string ModelPath = "models/chalet.obj";
+const std::string TexturePath = "textures/chalet.jpg";
 #else
-    const std::string ModelPath = "models/teapot.obj";
-    const std::string TexturePath = "textures/wood.png";
+const std::string ModelPath = "models/teapot.obj";
+const std::string TexturePath = "textures/wood.png";
 #endif
 
 #ifndef FORCE_VSYNC
@@ -62,10 +63,45 @@ const std::size_t RenderFrameRate = 120; // Hz
 #endif
 
 #ifdef NDEBUG
-const bool EnableVkValidationLayers = false;
+const bool EnableValidationLayers = false;
 #else
-const bool EnableVkValidationLayers = true;
+const bool EnableValidationLayers = true;
 #endif
+
+const std::vector<const char*> ValidationLayers =
+{
+    "VK_LAYER_LUNARG_standard_validation"
+};
+
+const std::vector<const char*> DeviceExtensions =
+{
+    VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,          // TODO: required for Vulkan RT?
+    VK_KHR_MAINTENANCE3_EXTENSION_NAME,                 // TODO: required for Vulkan RT?
+    VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+    VK_NV_RAY_TRACING_EXTENSION_NAME
+};
+
+const std::vector<const char*> InstanceExtensions =
+{
+    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
+};
+
+#define EXPECT_VK_SUCCESS(expression) \
+    { \
+        const VkResult result = (expression); \
+        if (result != VK_SUCCESS) \
+            throw std::runtime_error(std::string(#expression " failed with Vulkan error code ") + std::to_string(result)); \
+    }
+
+std::string make_version_string(const std::uint32_t version)
+{
+    std::stringstream sstr;
+    sstr << VK_VERSION_MAJOR(version) << ".";
+    sstr << VK_VERSION_MINOR(version) << ".";
+    sstr << VK_VERSION_PATCH(version);
+    return sstr.str();
+}
 
 struct UniformBufferObject
 {
@@ -200,41 +236,6 @@ namespace std
     };
 }
 
-const std::vector<const char*> ValidationLayers =
-{
-    "VK_LAYER_LUNARG_standard_validation"
-};
-
-const std::vector<const char*> DeviceExtensions =
-{
-    VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,          // TODO: required for Vulkan RT?
-    VK_KHR_MAINTENANCE3_EXTENSION_NAME,                 // TODO: required for Vulkan RT?
-    VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-    VK_NV_RAY_TRACING_EXTENSION_NAME
-};
-
-const std::vector<const char*> InstanceExtensions =
-{
-    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
-};
-
-#define EXPECT_VK_SUCCESS(expression) \
-    { \
-        const VkResult result = (expression); \
-        if (result != VK_SUCCESS) \
-            throw std::runtime_error(std::string(#expression " failed with Vulkan error code ") + std::to_string(result)); \
-    }
-
-std::string make_version_string(const std::uint32_t version)
-{
-    std::stringstream sstr;
-    sstr << VK_VERSION_MAJOR(version) << ".";
-    sstr << VK_VERSION_MINOR(version) << ".";
-    sstr << VK_VERSION_PATCH(version);
-    return sstr.str();
-}
-
 class HelloTriangleApplication
 {
   public:
@@ -272,7 +273,7 @@ class HelloTriangleApplication
 
     VkRenderPass                            m_render_pass;
     VkDescriptorSetLayout                   m_descriptor_set_layout;
-    VkPipelineLayout                        m_pipeline_layout;
+    VkPipelineLayout                        m_graphics_pipeline_layout;
     VkPipeline                              m_graphics_pipeline;
 
     VkCommandPool                           m_command_pool;
@@ -308,6 +309,11 @@ class HelloTriangleApplication
     VkDescriptorPool                        m_rt_descriptor_pool;
     VkDescriptorSetLayout                   m_rt_descriptor_set_layout;
     VkDescriptorSet                         m_rt_descriptor_set;
+    VkPipelineLayout                        m_rt_pipeline_layout;
+    VkPipeline                              m_rt_pipeline;
+    std::uint32_t                           m_rt_ray_gen_index;
+    std::uint32_t                           m_rt_ray_miss_index;
+    std::uint32_t                           m_rt_hit_group_index;
 
     std::uint32_t                           m_texture_mip_levels;
     VkImage                                 m_texture_image;
@@ -397,6 +403,7 @@ class HelloTriangleApplication
         create_vk_rt_acceleration_structures();
         create_vk_rt_raytracing_output();
         create_vk_rt_descriptor_set();
+        create_vk_rt_pipeline();
 
         create_vk_descriptor_pool();
         create_vk_descriptor_sets();
@@ -463,7 +470,7 @@ class HelloTriangleApplication
 
         std::vector<const char*> extensions(glfw_extension_names, glfw_extension_names + glfw_extension_count);
 
-        if (EnableVkValidationLayers)
+        if (EnableValidationLayers)
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
         extensions.insert(std::end(extensions), std::cbegin(InstanceExtensions), std::cend(InstanceExtensions));
@@ -507,7 +514,7 @@ class HelloTriangleApplication
     {
         std::cout << "Creating Vulkan instance..." << std::endl;
 
-        if (EnableVkValidationLayers && !check_vk_validation_layer_support())
+        if (EnableValidationLayers && !check_vk_validation_layer_support())
             throw std::runtime_error("One or more requested validation layers are not supported");
 
         const std::vector<const char*> instance_extensions = get_required_instance_extensions();
@@ -523,7 +530,7 @@ class HelloTriangleApplication
         VkInstanceCreateInfo create_info = {};
         create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         create_info.pApplicationInfo = &app_info;
-        if (EnableVkValidationLayers)
+        if (EnableValidationLayers)
         {
             create_info.enabledLayerCount = static_cast<std::uint32_t>(ValidationLayers.size());
             create_info.ppEnabledLayerNames = ValidationLayers.data();
@@ -542,7 +549,7 @@ class HelloTriangleApplication
 
     void setup_vk_debug_messenger()
     {
-        if (EnableVkValidationLayers)
+        if (EnableValidationLayers)
         {
             std::cout << "Setting up Vulkan debug messenger..." << std::endl;
 
@@ -892,7 +899,7 @@ class HelloTriangleApplication
         device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         device_create_info.queueCreateInfoCount = static_cast<std::uint32_t>(queue_create_infos.size());
         device_create_info.pQueueCreateInfos = queue_create_infos.data();
-        if (EnableVkValidationLayers)
+        if (EnableValidationLayers)
         {
             device_create_info.enabledLayerCount = static_cast<std::uint32_t>(ValidationLayers.size());
             device_create_info.ppEnabledLayerNames = ValidationLayers.data();
@@ -1264,8 +1271,8 @@ class HelloTriangleApplication
         pipeline_layout_create_info.pushConstantRangeCount = 0;
         pipeline_layout_create_info.pPushConstantRanges = nullptr;
 
-        if (vkCreatePipelineLayout(m_device, &pipeline_layout_create_info, nullptr, &m_pipeline_layout) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create Vulkan pipeline layout");
+        if (vkCreatePipelineLayout(m_device, &pipeline_layout_create_info, nullptr, &m_graphics_pipeline_layout) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create Vulkan graphics pipeline layout");
 
         VkGraphicsPipelineCreateInfo pipeline_create_info = {};
         pipeline_create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -1279,14 +1286,14 @@ class HelloTriangleApplication
         pipeline_create_info.pDepthStencilState = &depth_stencil;
         pipeline_create_info.pColorBlendState = &color_blending;
         pipeline_create_info.pDynamicState = nullptr;
-        pipeline_create_info.layout = m_pipeline_layout;
+        pipeline_create_info.layout = m_graphics_pipeline_layout;
         pipeline_create_info.renderPass = m_render_pass;
         pipeline_create_info.subpass = 0;
         pipeline_create_info.basePipelineHandle = VK_NULL_HANDLE;
         pipeline_create_info.basePipelineIndex = -1;
 
         if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &m_graphics_pipeline) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create Vulkan pipeline");
+            throw std::runtime_error("Failed to create Vulkan graphics pipeline");
 
         vkDestroyShaderModule(m_device, frag_shader_module, nullptr);
         vkDestroyShaderModule(m_device, vert_shader_module, nullptr);
@@ -1779,62 +1786,62 @@ class HelloTriangleApplication
         // Create descriptor set.
         //
 
-        nv_helpers_vk::DescriptorSetGenerator descriptorSetGenerator;
+        nv_helpers_vk::DescriptorSetGenerator descriptor_set_generator;
 
         // Location 0: top-level acceleration structure.
-        descriptorSetGenerator.AddBinding(
+        descriptor_set_generator.AddBinding(
             0,
             1,
             VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV,
             VK_SHADER_STAGE_RAYGEN_BIT_NV);
 
         // Location 1: ray tracing output image.
-        descriptorSetGenerator.AddBinding(
+        descriptor_set_generator.AddBinding(
             1,
             1,
             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
             VK_SHADER_STAGE_RAYGEN_BIT_NV);
 
         // Location 2: camera information.
-        descriptorSetGenerator.AddBinding(
+        descriptor_set_generator.AddBinding(
             2,
             1,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             VK_SHADER_STAGE_RAYGEN_BIT_NV);
 
         // Location 3: vertex buffer.
-        descriptorSetGenerator.AddBinding(
+        descriptor_set_generator.AddBinding(
             3,
             1,
             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,      // TODO: why?
             VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV);
 
         // Location 4: index buffer.
-        descriptorSetGenerator.AddBinding(
+        descriptor_set_generator.AddBinding(
             4,
             1,
             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,      // TODO: why?
             VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV);
 
         // Location 5: material buffer.
-        descriptorSetGenerator.AddBinding(
+        descriptor_set_generator.AddBinding(
             5,
             1,
             VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV);
 
         // Location 6: textures.
-        descriptorSetGenerator.AddBinding(
+        descriptor_set_generator.AddBinding(
             6,
             1,  // TODO: number of textures
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV);
 
-        m_rt_descriptor_pool = descriptorSetGenerator.GeneratePool(m_device);
-        m_rt_descriptor_set_layout = descriptorSetGenerator.GenerateLayout(m_device);
+        m_rt_descriptor_pool = descriptor_set_generator.GeneratePool(m_device);
+        m_rt_descriptor_set_layout = descriptor_set_generator.GenerateLayout(m_device);
 
         m_rt_descriptor_set =
-            descriptorSetGenerator.GenerateSet(
+            descriptor_set_generator.GenerateSet(
                 m_device,
                 m_rt_descriptor_pool,
                 m_rt_descriptor_set_layout);
@@ -1844,52 +1851,81 @@ class HelloTriangleApplication
         //
 
         // Bind top-level acceleration structure.
-        VkWriteDescriptorSetAccelerationStructureNV descriptorAccelerationStructureInfo = {};
-        descriptorAccelerationStructureInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_NV;
-        descriptorAccelerationStructureInfo.accelerationStructureCount = 1;
-        descriptorAccelerationStructureInfo.pAccelerationStructures = &m_rt_top_level_as.m_structure;
-        descriptorSetGenerator.Bind(m_rt_descriptor_set, 0, { descriptorAccelerationStructureInfo });
+        VkWriteDescriptorSetAccelerationStructureNV descriptor_acceleration_structure_info = {};
+        descriptor_acceleration_structure_info.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_NV;
+        descriptor_acceleration_structure_info.accelerationStructureCount = 1;
+        descriptor_acceleration_structure_info.pAccelerationStructures = &m_rt_top_level_as.m_structure;
+        descriptor_set_generator.Bind(m_rt_descriptor_set, 0, { descriptor_acceleration_structure_info });
 
         // Bind ray tracing output image.
-        VkDescriptorImageInfo descriptorOutputImageInfo = {};
-        descriptorOutputImageInfo.sampler = nullptr;
-        descriptorOutputImageInfo.imageView = m_rt_output_image_view;
-        descriptorOutputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        descriptorSetGenerator.Bind(m_rt_descriptor_set, 1, { descriptorOutputImageInfo });
+        VkDescriptorImageInfo descriptor_output_image_info = {};
+        descriptor_output_image_info.sampler = nullptr;
+        descriptor_output_image_info.imageView = m_rt_output_image_view;
+        descriptor_output_image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        descriptor_set_generator.Bind(m_rt_descriptor_set, 1, { descriptor_output_image_info });
 
         // Bind camera information.
         // TODO: which uniform buffer to bind? We have one per swap chain image!
-        VkDescriptorBufferInfo descriptorCameraInfo = {};
-        descriptorCameraInfo.buffer = m_uniform_buffers[0];
-        descriptorCameraInfo.range = sizeof(UniformBufferObject);
-        descriptorSetGenerator.Bind(m_rt_descriptor_set, 2, { descriptorCameraInfo });
+        VkDescriptorBufferInfo descriptor_camera_info = {};
+        descriptor_camera_info.buffer = m_uniform_buffers[0];
+        descriptor_camera_info.range = sizeof(UniformBufferObject);
+        descriptor_set_generator.Bind(m_rt_descriptor_set, 2, { descriptor_camera_info });
 
         // Bind vertex buffer.
-        VkDescriptorBufferInfo descriptorVertexBufferInfo = {};
-        descriptorVertexBufferInfo.buffer = m_vertex_buffer;
-        descriptorVertexBufferInfo.range = VK_WHOLE_SIZE;
-        descriptorSetGenerator.Bind(m_rt_descriptor_set, 3, { descriptorVertexBufferInfo });
+        VkDescriptorBufferInfo descriptor_vertex_buffer_info = {};
+        descriptor_vertex_buffer_info.buffer = m_vertex_buffer;
+        descriptor_vertex_buffer_info.range = VK_WHOLE_SIZE;
+        descriptor_set_generator.Bind(m_rt_descriptor_set, 3, { descriptor_vertex_buffer_info });
 
         // Bind index buffer.
-        VkDescriptorBufferInfo descriptorIndexBufferInfo = {};
-        descriptorIndexBufferInfo.buffer = m_index_buffer;
-        descriptorIndexBufferInfo.range = VK_WHOLE_SIZE;
-        descriptorSetGenerator.Bind(m_rt_descriptor_set, 4, { descriptorIndexBufferInfo });
+        VkDescriptorBufferInfo descriptor_index_buffer_info = {};
+        descriptor_index_buffer_info.buffer = m_index_buffer;
+        descriptor_index_buffer_info.range = VK_WHOLE_SIZE;
+        descriptor_set_generator.Bind(m_rt_descriptor_set, 4, { descriptor_index_buffer_info });
 
         // Bind material buffer.
-        VkDescriptorBufferInfo descriptorMaterialBufferInfo = {};
-        descriptorMaterialBufferInfo.buffer = m_material_buffer;
-        descriptorMaterialBufferInfo.range = VK_WHOLE_SIZE;
-        descriptorSetGenerator.Bind(m_rt_descriptor_set, 5, { descriptorMaterialBufferInfo });
+        VkDescriptorBufferInfo descriptor_material_buffer_info = {};
+        descriptor_material_buffer_info.buffer = m_material_buffer;
+        descriptor_material_buffer_info.range = VK_WHOLE_SIZE;
+        descriptor_set_generator.Bind(m_rt_descriptor_set, 5, { descriptor_material_buffer_info });
 
         // Bind textures.
-        VkDescriptorImageInfo descriptorTextureInfo = {};
-        descriptorTextureInfo.sampler = m_texture_sampler;
-        descriptorTextureInfo.imageView = m_texture_image_view;
-        descriptorTextureInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        descriptorSetGenerator.Bind(m_rt_descriptor_set, 6, { descriptorTextureInfo });
+        VkDescriptorImageInfo descriptor_texture_info = {};
+        descriptor_texture_info.sampler = m_texture_sampler;
+        descriptor_texture_info.imageView = m_texture_image_view;
+        descriptor_texture_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        descriptor_set_generator.Bind(m_rt_descriptor_set, 6, { descriptor_texture_info });
 
-        descriptorSetGenerator.UpdateSetContents(m_device, m_rt_descriptor_set);
+        descriptor_set_generator.UpdateSetContents(m_device, m_rt_descriptor_set);
+    }
+
+    void create_vk_rt_pipeline()
+    {
+        std::cout << "Creating Vulkan ray tracing pipeline..." << std::endl;
+
+        const std::vector<char> ray_gen_shader_code = read_file("shaders/ray_gen.spv");
+        const std::vector<char> ray_miss_shader_code = read_file("shaders/ray_miss.spv");
+        const std::vector<char> ray_closest_hit_code = read_file("shaders/ray_closest_hit.spv");
+
+        const VkShaderModule ray_gen_shader_module = create_vk_shader_module(ray_gen_shader_code);
+        const VkShaderModule ray_miss_shader_module = create_vk_shader_module(ray_miss_shader_code);
+        const VkShaderModule ray_closest_hit_module = create_vk_shader_module(ray_closest_hit_code);
+
+        nv_helpers_vk::RayTracingPipelineGenerator pipeline_generator;
+        pipeline_generator.SetMaxRecursionDepth(1);
+
+        m_rt_ray_gen_index = pipeline_generator.AddRayGenShaderStage(ray_gen_shader_module);
+        m_rt_ray_miss_index = pipeline_generator.AddMissShaderStage(ray_miss_shader_module);
+
+        m_rt_hit_group_index = pipeline_generator.StartHitGroup();
+        pipeline_generator.AddHitShaderStage(ray_closest_hit_module, VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV);
+        pipeline_generator.EndHitGroup();
+
+        pipeline_generator.Generate(
+            m_device,
+            m_rt_descriptor_set_layout,
+            &m_rt_pipeline,
+            &m_rt_pipeline_layout);
     }
 
     AccelerationStructure create_vk_rt_bottom_level_as(VkCommandBuffer command_buffer) const
@@ -2308,7 +2344,7 @@ class HelloTriangleApplication
             vkCmdBindDescriptorSets(
                 m_command_buffers[i],
                 VK_PIPELINE_BIND_POINT_GRAPHICS,
-                m_pipeline_layout,
+                m_graphics_pipeline_layout,
                 0,
                 1,
                 &m_descriptor_sets[i],
@@ -2549,7 +2585,7 @@ class HelloTriangleApplication
             m_command_buffers.data());
 
         vkDestroyPipeline(m_device, m_graphics_pipeline, nullptr);
-        vkDestroyPipelineLayout(m_device, m_pipeline_layout, nullptr);
+        vkDestroyPipelineLayout(m_device, m_graphics_pipeline_layout, nullptr);
         vkDestroyRenderPass(m_device, m_render_pass, nullptr);
 
         for (const VkImageView image_view : m_swap_chain_image_views)
@@ -2600,7 +2636,7 @@ class HelloTriangleApplication
 
         vkDestroyDevice(m_device, nullptr);
 
-        if (EnableVkValidationLayers)
+        if (EnableValidationLayers)
         {
             auto vkDestroyDebugUtilsMessengerEXTFn =
                 reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(m_instance, "vkDestroyDebugUtilsMessengerEXT"));
