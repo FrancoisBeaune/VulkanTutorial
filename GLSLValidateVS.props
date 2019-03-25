@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <PropertyPageSchema Include="$(MSBuildThisFileDirectory)GLSLValidateTargets.props" />
+    <AvailableItemName Include="GLSLValidate">
+      <Targets>GLSLValidate</Targets>
+    </AvailableItemName>
+  </ItemGroup>
+  <PropertyGroup Label="UserMacros">
+    <GLSLVALIDATOREXE>%VULKAN_SDK%\Bin\glslangValidator.exe</GLSLVALIDATOREXE>
+  </PropertyGroup>
+  <ItemGroup>
+    <BuildMacro Include="GLSLVALIDATOREXE">
+      <Value>$(GLSLVALIDATOREXE)</Value>
+      <EnvironmentVariable>true</EnvironmentVariable>
+    </BuildMacro>
+  </ItemGroup>
+  <Target Name="GLSLValidate" Condition="'@(GLSLValidate)' != ''" AfterTargets="Compile" BeforeTargets="Link">
+    <Message Text="Building GLSL Shaders..." Importance="High" />
+    <ItemGroup>
+      <GLSLValidate>
+        <Message>%(Filename)%(Extension)</Message>
+        <Command>$(GLSLVALIDATOREXE) -V "%(GLSLValidate.FullPath)" -o %(RelativeDir)%(Filename).spv</Command>
+        <Outputs>%(RelativeDir)%(Filename).spv</Outputs>
+      </GLSLValidate>
+    </ItemGroup>
+    <CustomBuild
+      Sources="@(GLSLValidate)"
+      MinimalRebuildFromTracking="true"
+      TrackerLogDirectory="$(TLogLocation)"
+      ErrorListRegex="(?'CATEGORY'ERROR|WARNING): (?'FILENAME'.+):(?'LINE'\d+): (?'TEXT'.*)"/>
+  </Target>
+</Project>
