@@ -105,7 +105,8 @@ void BottomLevelASGenerator::AddVertexBuffer( VkBuffer vertexBuffer,  // Buffer 
   geometry.geometry.triangles.transformData   = transformBuffer;
   geometry.geometry.triangles.transformOffset = transformOffsetInBytes;
   geometry.geometry.aabbs                     = {};
-  geometry.flags                              = isOpaque ? VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_NV : 0;
+  geometry.geometry.aabbs.sType               = VK_STRUCTURE_TYPE_GEOMETRY_AABB_NV;
+  geometry.flags                              = isOpaque ? VK_GEOMETRY_OPAQUE_BIT_NV : 0;
 
   m_vertexBuffers.push_back( geometry );
 }
@@ -123,9 +124,10 @@ VkAccelerationStructureNV BottomLevelASGenerator::CreateAccelerationStructure( V
 
   // Create the descriptor of the acceleration structure, which contains the number of geometry
   // descriptors it will contain
-  VkAccelerationStructureCreateInfoNV accelerationStructureInfo;
+  VkAccelerationStructureCreateInfoNV accelerationStructureInfo = {};
   accelerationStructureInfo.sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV;
   accelerationStructureInfo.pNext         = nullptr;
+  accelerationStructureInfo.info.sType    = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV;
   accelerationStructureInfo.info.type     = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_NV;
   accelerationStructureInfo.info.flags    = m_flags;
   accelerationStructureInfo.compactedSize = 0;
@@ -267,6 +269,7 @@ void BottomLevelASGenerator::Generate( VkDevice        device,
   memoryBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV;
   memoryBarrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV;
 
+  // TODO: srcAccessMask and dstAccessMask bits not compatible with srcStageMask and dstStageMask.
   vkCmdPipelineBarrier( commandList, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_NV,
                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_NV, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr );
 }

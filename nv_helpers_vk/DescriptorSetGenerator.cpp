@@ -78,7 +78,7 @@ VkDescriptorPool DescriptorSetGenerator::GeneratePool(VkDevice device, uint32_t 
   // Create the pool information descriptor, that contains the number of descriptors of each type
   VkDescriptorPoolCreateInfo poolInfo = {};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  poolInfo.poolSizeCount = VK_DESCRIPTOR_TYPE_RANGE_SIZE;
+  poolInfo.poolSizeCount = static_cast<uint32_t>(counters.size());
   poolInfo.pPoolSizes = counters.data();
   poolInfo.maxSets = maxSets;
 

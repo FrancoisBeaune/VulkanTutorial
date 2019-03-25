@@ -87,9 +87,10 @@ TopLevelASGenerator::CreateAccelerationStructure(VkDevice device,
   // to be set before the actual build
   m_flags = allowUpdate ? VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_NV : 0;
 
-  VkAccelerationStructureCreateInfoNV accelerationStructureInfo;
+  VkAccelerationStructureCreateInfoNV accelerationStructureInfo = {};
   accelerationStructureInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV;
   accelerationStructureInfo.pNext = nullptr;
+  accelerationStructureInfo.info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV;
   accelerationStructureInfo.info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_NV;
   accelerationStructureInfo.info.flags = m_flags;
   accelerationStructureInfo.compactedSize = 0;
