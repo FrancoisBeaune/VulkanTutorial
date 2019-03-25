@@ -44,18 +44,6 @@ VKAPI_ATTR void VKAPI_CALL vkGetAccelerationStructureMemoryRequirementsNV(
   return call(device, pInfo, pMemoryRequirements);
 }
 
-/*
-// No longer available?
-VKAPI_ATTR void VKAPI_CALL vkGetAccelerationStructureScratchMemoryRequirementsNV(
-    VkDevice device, const VkAccelerationStructureMemoryRequirementsInfoNV *pInfo,
-    VkMemoryRequirements2KHR *pMemoryRequirements)
-{
-  static const auto call =
-      reinterpret_cast<PFN_vkGetAccelerationStructureScratchMemoryRequirementsNV>(
-          vkGetDeviceProcAddr(device, "vkGetAccelerationStructureScratchMemoryRequirementsNV"));
-  return call(device, pInfo, pMemoryRequirements);
-}*/
-
 VKAPI_ATTR VkResult VKAPI_CALL vkBindAccelerationStructureMemoryNV(
     VkDevice                                    device,
     uint32_t                                    bindInfoCount,
