@@ -193,6 +193,7 @@
       <TreatOutputAsContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</TreatOutputAsContent>
       <TreatOutputAsContent Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</TreatOutputAsContent>
     </CustomBuild>
+    <ClCompile Include="vulkan_raytracing.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="nv_helpers_vk\BottomLevelASGenerator.h" />

@@ -21,6 +21,9 @@
     <ClCompile Include="nv_helpers_vk\VKHelpers.cpp">
       <Filter>3rdparty\nv_helpers_vk</Filter>
     </ClCompile>
+    <ClCompile Include="vulkan_raytracing.cpp">
+      <Filter>3rdparty</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="shaders">
