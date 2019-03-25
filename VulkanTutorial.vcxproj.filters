@@ -3,6 +3,24 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="vku.cpp" />
+    <ClCompile Include="nv_helpers_vk\BottomLevelASGenerator.cpp">
+      <Filter>3rdparty\nv_helpers_vk</Filter>
+    </ClCompile>
+    <ClCompile Include="nv_helpers_vk\DescriptorSetGenerator.cpp">
+      <Filter>3rdparty\nv_helpers_vk</Filter>
+    </ClCompile>
+    <ClCompile Include="nv_helpers_vk\RaytracingPipelineGenerator.cpp">
+      <Filter>3rdparty\nv_helpers_vk</Filter>
+    </ClCompile>
+    <ClCompile Include="nv_helpers_vk\ShaderBindingTableGenerator.cpp">
+      <Filter>3rdparty\nv_helpers_vk</Filter>
+    </ClCompile>
+    <ClCompile Include="nv_helpers_vk\TopLevelASGenerator.cpp">
+      <Filter>3rdparty\nv_helpers_vk</Filter>
+    </ClCompile>
+    <ClCompile Include="nv_helpers_vk\VKHelpers.cpp">
+      <Filter>3rdparty\nv_helpers_vk</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="shaders">
@@ -19,6 +37,9 @@
     <CustomBuild Include="shaders\shader.vert">
       <Filter>shaders</Filter>
     </CustomBuild>
+    <Filter Include="3rdparty\nv_helpers_vk">
+      <UniqueIdentifier>{17b8ec05-77a1-47c3-9bb4-991141679cbd}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="vku.h" />
@@ -27,6 +48,24 @@
     </ClInclude>
     <ClInclude Include="tiny_obj_loader.h">
       <Filter>3rdparty</Filter>
+    </ClInclude>
+    <ClInclude Include="nv_helpers_vk\BottomLevelASGenerator.h">
+      <Filter>3rdparty\nv_helpers_vk</Filter>
+    </ClInclude>
+    <ClInclude Include="nv_helpers_vk\DescriptorSetGenerator.h">
+      <Filter>3rdparty\nv_helpers_vk</Filter>
+    </ClInclude>
+    <ClInclude Include="nv_helpers_vk\RaytracingPipelineGenerator.h">
+      <Filter>3rdparty\nv_helpers_vk</Filter>
+    </ClInclude>
+    <ClInclude Include="nv_helpers_vk\ShaderBindingTableGenerator.h">
+      <Filter>3rdparty\nv_helpers_vk</Filter>
+    </ClInclude>
+    <ClInclude Include="nv_helpers_vk\TopLevelASGenerator.h">
+      <Filter>3rdparty\nv_helpers_vk</Filter>
+    </ClInclude>
+    <ClInclude Include="nv_helpers_vk\VKHelpers.h">
+      <Filter>3rdparty\nv_helpers_vk</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
