@@ -16,6 +16,7 @@
 #include "nv_helpers_vk/BottomLevelASGenerator.h"
 #include "nv_helpers_vk/DescriptorSetGenerator.h"
 #include "nv_helpers_vk/RaytracingPipelineGenerator.h"
+#include "nv_helpers_vk/ShaderBindingTableGenerator.h"
 #include "nv_helpers_vk/TopLevelASGenerator.h"
 #include "nv_helpers_vk/VKHelpers.h"
 
@@ -50,6 +51,15 @@ const int WindowWidth = 800;
 const int WindowHeight = 600;
 const std::size_t MaxFramesInFlight = 2;
 
+enum class RenderingMode
+{
+    Rasterization,
+    RayTracing
+};
+
+//const RenderingMode CurrentRenderingMode = RenderingMode::Rasterization;
+const RenderingMode CurrentRenderingMode = RenderingMode::RayTracing;
+
 #ifdef NDEBUG
 const std::string ModelPath = "models/chalet.obj";
 const std::string TexturePath = "textures/chalet.jpg";
@@ -75,8 +85,6 @@ const std::vector<const char*> ValidationLayers =
 
 const std::vector<const char*> DeviceExtensions =
 {
-    VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,          // TODO: required for Vulkan RT?
-    VK_KHR_MAINTENANCE3_EXTENSION_NAME,                 // TODO: required for Vulkan RT?
     VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     VK_NV_RAY_TRACING_EXTENSION_NAME
@@ -249,91 +257,94 @@ class HelloTriangleApplication
     }
 
   private:
-    GLFWwindow*                             m_window;
+    GLFWwindow*                                 m_window;
 
-    VkInstance                              m_instance;
-    VkDebugUtilsMessengerEXT                m_debug_messenger;
-    VkSurfaceKHR                            m_surface;
+    VkInstance                                  m_instance;
+    VkDebugUtilsMessengerEXT                    m_debug_messenger;
+    VkSurfaceKHR                                m_surface;
 
-    VkPhysicalDevice                        m_physical_device;
-    VkSampleCountFlagBits                   m_msaa_samples = VK_SAMPLE_COUNT_1_BIT;
-    VkPhysicalDeviceRayTracingPropertiesNV  m_phsical_device_rt_props;
+    VkPhysicalDevice                            m_physical_device;
+    VkSampleCountFlagBits                       m_msaa_samples = VK_SAMPLE_COUNT_1_BIT;
+    VkPhysicalDeviceRayTracingPropertiesNV      m_phsical_device_rt_props;
 
-    VkDevice                                m_device;
+    VkDevice                                    m_device;
 
-    VkQueue                                 m_graphics_queue;
-    VkQueue                                 m_present_queue;
+    VkQueue                                     m_graphics_queue;
+    VkQueue                                     m_present_queue;
 
-    VkSwapchainKHR                          m_swap_chain;
-    VkFormat                                m_swap_chain_surface_format;
-    VkExtent2D                              m_swap_chain_extent;
-    std::vector<VkImage>                    m_swap_chain_images;
-    std::vector<VkImageView>                m_swap_chain_image_views;
-    std::vector<VkFramebuffer>              m_swap_chain_framebuffers;
+    VkSwapchainKHR                              m_swap_chain;
+    VkFormat                                    m_swap_chain_surface_format;
+    VkExtent2D                                  m_swap_chain_extent;
+    std::vector<VkImage>                        m_swap_chain_images;
+    std::vector<VkImageView>                    m_swap_chain_image_views;
+    std::vector<VkFramebuffer>                  m_swap_chain_framebuffers;
 
-    VkRenderPass                            m_render_pass;
-    VkDescriptorSetLayout                   m_descriptor_set_layout;
-    VkPipelineLayout                        m_graphics_pipeline_layout;
-    VkPipeline                              m_graphics_pipeline;
+    VkRenderPass                                m_render_pass;
+    VkDescriptorSetLayout                       m_descriptor_set_layout;
+    VkPipelineLayout                            m_graphics_pipeline_layout;
+    VkPipeline                                  m_graphics_pipeline;
 
-    VkCommandPool                           m_command_pool;
-    VkCommandPool                           m_transient_command_pool;
+    VkCommandPool                               m_command_pool;
+    VkCommandPool                               m_transient_command_pool;
 
-    VkImage                                 m_color_image;
-    VkDeviceMemory                          m_color_image_memory;
-    VkImageView                             m_color_image_view;
+    VkImage                                     m_color_image;
+    VkDeviceMemory                              m_color_image_memory;
+    VkImageView                                 m_color_image_view;
 
-    VkImage                                 m_depth_image;
-    VkDeviceMemory                          m_depth_image_memory;
-    VkImageView                             m_depth_image_view;
+    VkImage                                     m_depth_image;
+    VkDeviceMemory                              m_depth_image_memory;
+    VkImageView                                 m_depth_image_view;
 
-    std::vector<Vertex>                     m_vertices;
-    std::vector<std::uint32_t>              m_indices;
-    std::vector<Material>                   m_materials;
+    std::vector<Vertex>                         m_vertices;
+    std::vector<std::uint32_t>                  m_indices;
+    std::vector<Material>                       m_materials;
 
-    VkBuffer                                m_vertex_buffer;
-    VkDeviceMemory                          m_vertex_buffer_memory;
-    VkBuffer                                m_index_buffer;
-    VkDeviceMemory                          m_index_buffer_memory;
-    VkBuffer                                m_material_buffer;
-    VkDeviceMemory                          m_material_buffer_memory;
-    std::vector<VkBuffer>                   m_uniform_buffers;
-    std::vector<VkDeviceMemory>             m_uniform_buffers_memory;
+    VkBuffer                                    m_vertex_buffer;
+    VkDeviceMemory                              m_vertex_buffer_memory;
+    VkBuffer                                    m_index_buffer;
+    VkDeviceMemory                              m_index_buffer_memory;
+    VkBuffer                                    m_material_buffer;
+    VkDeviceMemory                              m_material_buffer_memory;
+    std::vector<VkBuffer>                       m_uniform_buffers;
+    std::vector<VkDeviceMemory>                 m_uniform_buffers_memory;
 
     // Vulkan Ray Tracing.
-    nv_helpers_vk::TopLevelASGenerator      m_rt_top_level_as_gen;
-    AccelerationStructure                   m_rt_top_level_as;
-    VkImage                                 m_rt_output_image;
-    VkDeviceMemory                          m_rt_output_image_memory;
-    VkImageView                             m_rt_output_image_view;
-    VkDescriptorPool                        m_rt_descriptor_pool;
-    VkDescriptorSetLayout                   m_rt_descriptor_set_layout;
-    VkDescriptorSet                         m_rt_descriptor_set;
-    VkPipelineLayout                        m_rt_pipeline_layout;
-    VkPipeline                              m_rt_pipeline;
-    std::uint32_t                           m_rt_ray_gen_index;
-    std::uint32_t                           m_rt_ray_miss_index;
-    std::uint32_t                           m_rt_hit_group_index;
+    nv_helpers_vk::TopLevelASGenerator          m_rt_top_level_as_gen;
+    AccelerationStructure                       m_rt_top_level_as;
+    VkImage                                     m_rt_output_image;
+    VkDeviceMemory                              m_rt_output_image_memory;
+    VkImageView                                 m_rt_output_image_view;
+    VkDescriptorPool                            m_rt_descriptor_pool;
+    VkDescriptorSetLayout                       m_rt_descriptor_set_layout;
+    VkDescriptorSet                             m_rt_descriptor_set;
+    VkPipelineLayout                            m_rt_pipeline_layout;
+    VkPipeline                                  m_rt_pipeline;
+    std::uint32_t                               m_rt_ray_gen_index;
+    std::uint32_t                               m_rt_ray_miss_index;
+    std::uint32_t                               m_rt_hit_group_index;
+    nv_helpers_vk::ShaderBindingTableGenerator  m_rt_sbt_generator;
+    VkBuffer                                    m_rt_shader_binding_table_buffer;
+    VkDeviceMemory                              m_rt_shader_binding_table_buffer_memory;
 
-    std::uint32_t                           m_texture_mip_levels;
-    VkImage                                 m_texture_image;
-    VkDeviceMemory                          m_texture_image_memory;
-    VkImageView                             m_texture_image_view;
-    VkSampler                               m_texture_sampler;
+    std::uint32_t                               m_texture_mip_levels;
+    VkImage                                     m_texture_image;
+    VkDeviceMemory                              m_texture_image_memory;
+    VkImageView                                 m_texture_image_view;
+    VkSampler                                   m_texture_sampler;
 
-    VkDescriptorPool                        m_descriptor_pool;
-    std::vector<VkDescriptorSet>            m_descriptor_sets;
+    VkDescriptorPool                            m_descriptor_pool;
+    std::vector<VkDescriptorSet>                m_descriptor_sets;
 
-    std::vector<VkCommandBuffer>            m_command_buffers;
+    std::vector<VkCommandBuffer>                m_command_buffers;
 
-    std::vector<VkSemaphore>                m_image_available_semaphores;
-    std::vector<VkSemaphore>                m_render_finished_semaphores;
-    std::vector<VkFence>                    m_in_flight_fences;
+    std::vector<VkSemaphore>                    m_image_available_semaphores;
+    std::vector<VkSemaphore>                    m_render_finished_semaphores;
+    std::vector<VkFence>                        m_in_flight_fences;
 
-    std::atomic<bool>                       m_framebuffer_resized = false;
+    std::atomic<bool>                           m_framebuffer_resized = false;
 
     // "Game state".
-    float                                   m_rotation_angle = 0.0f;
+    float                                       m_rotation_angle = 0.0f;
 
     void create_window()
     {
@@ -404,6 +415,7 @@ class HelloTriangleApplication
         create_vk_rt_raytracing_output();
         create_vk_rt_descriptor_set();
         create_vk_rt_pipeline();
+        create_vk_rt_shader_binding_table();
 
         create_vk_descriptor_pool();
         create_vk_descriptor_sets();
@@ -952,7 +964,8 @@ class HelloTriangleApplication
         create_info.imageColorSpace = surface_format.colorSpace;
         create_info.imageExtent = extent;
         create_info.imageArrayLayers = 1;
-        create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        // VK_IMAGE_USAGE_TRANSFER_DST_BIT allows copying ray tracing results into the swap chain image.
+        create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         if (indices.m_graphics_family == indices.m_present_family)
         {
             create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -1316,7 +1329,9 @@ class HelloTriangleApplication
     {
         std::cout << "Creating Vulkan command pools..." << std::endl;
 
-        create_vk_command_pool(0, m_command_pool);
+        // VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT required because we rewrite command buffers
+        // for each frame during ray tracing.
+        create_vk_command_pool(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, m_command_pool);
         create_vk_command_pool(VK_COMMAND_POOL_CREATE_TRANSIENT_BIT, m_transient_command_pool);
     }
 
@@ -1708,6 +1723,70 @@ class HelloTriangleApplication
             command_buffer);
     }
 
+    AccelerationStructure create_vk_rt_bottom_level_as(VkCommandBuffer command_buffer) const
+    {
+        GeometryInstance geometry_instance;
+        geometry_instance.m_vertex_buffer = m_vertex_buffer;
+        geometry_instance.m_vertex_count = static_cast<std::uint32_t>(m_vertices.size());
+        geometry_instance.m_vertex_offset = 0;
+        geometry_instance.m_index_buffer = m_index_buffer;
+        geometry_instance.m_index_count = static_cast<std::uint32_t>(m_indices.size());
+        geometry_instance.m_index_offset = 0;
+        geometry_instance.m_transform = glm::mat4x4(1.0f);
+
+        nv_helpers_vk::BottomLevelASGenerator bottom_level_as_gen;
+        bottom_level_as_gen.AddVertexBuffer(
+            geometry_instance.m_vertex_buffer,
+            geometry_instance.m_vertex_offset,
+            geometry_instance.m_vertex_count,
+            sizeof(Vertex),
+            geometry_instance.m_index_buffer,
+            geometry_instance.m_index_offset,
+            geometry_instance.m_index_count,
+            VK_NULL_HANDLE,
+            0);
+
+        AccelerationStructure bottom_level_as;
+        bottom_level_as.m_structure = bottom_level_as_gen.CreateAccelerationStructure(m_device, VK_FALSE);
+
+        VkDeviceSize scratch_size = 0;  // bytes
+        VkDeviceSize result_size = 0;   // bytes
+        bottom_level_as_gen.ComputeASBufferSizes(m_device, bottom_level_as.m_structure, &scratch_size, &result_size);
+
+        // TODO: replace by vku function?
+        nv_helpers_vk::createBuffer(
+            m_physical_device,
+            m_device,
+            scratch_size,
+            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            &bottom_level_as.m_scratch_buffer,
+            &bottom_level_as.m_scratch_mem,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        // TODO: replace by vku function?
+        nv_helpers_vk::createBuffer(
+            m_physical_device,
+            m_device,
+            result_size,
+            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
+            &bottom_level_as.m_result_buffer,
+            &bottom_level_as.m_result_mem,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        bottom_level_as_gen.Generate(
+            m_device,
+            command_buffer,
+            bottom_level_as.m_structure,
+            bottom_level_as.m_scratch_buffer,
+            0,
+            bottom_level_as.m_result_buffer,
+            bottom_level_as.m_result_mem,
+            VK_FALSE,
+            VK_NULL_HANDLE);
+
+        return bottom_level_as;
+    }
+
     void create_vk_rt_raytracing_output()
     {
         std::cout << "Creating Vulkan ray tracing output image..." << std::endl;
@@ -1928,68 +2007,30 @@ class HelloTriangleApplication
             &m_rt_pipeline_layout);
     }
 
-    AccelerationStructure create_vk_rt_bottom_level_as(VkCommandBuffer command_buffer) const
+    void create_vk_rt_shader_binding_table()
     {
-        GeometryInstance geometry_instance;
-        geometry_instance.m_vertex_buffer = m_vertex_buffer;
-        geometry_instance.m_vertex_count = static_cast<std::uint32_t>(m_vertices.size());
-        geometry_instance.m_vertex_offset = 0;
-        geometry_instance.m_index_buffer = m_index_buffer;
-        geometry_instance.m_index_count = static_cast<std::uint32_t>(m_indices.size());
-        geometry_instance.m_index_offset = 0;
-        geometry_instance.m_transform = glm::mat4x4(1.0f);
+        std::cout << "Creating Vulkan ray tracing shader binding table..." << std::endl;
 
-        nv_helpers_vk::BottomLevelASGenerator bottom_level_as_gen;
-        bottom_level_as_gen.AddVertexBuffer(
-            geometry_instance.m_vertex_buffer,
-            geometry_instance.m_vertex_offset,
-            geometry_instance.m_vertex_count,
-            sizeof(Vertex),
-            geometry_instance.m_index_buffer,
-            geometry_instance.m_index_offset,
-            geometry_instance.m_index_count,
-            VK_NULL_HANDLE,
-            0);
+        m_rt_sbt_generator.AddRayGenerationProgram(m_rt_ray_gen_index, {});
+        m_rt_sbt_generator.AddMissProgram(m_rt_ray_miss_index, {});
+        m_rt_sbt_generator.AddHitGroup(m_rt_hit_group_index, {});
 
-        AccelerationStructure bottom_level_as;
-        bottom_level_as.m_structure = bottom_level_as_gen.CreateAccelerationStructure(m_device, VK_FALSE);
-
-        VkDeviceSize scratch_size = 0;  // bytes
-        VkDeviceSize result_size = 0;   // bytes
-        bottom_level_as_gen.ComputeASBufferSizes(m_device, bottom_level_as.m_structure, &scratch_size, &result_size);
+        const VkDeviceSize sbt_size = m_rt_sbt_generator.ComputeSBTSize(m_phsical_device_rt_props);
 
         // TODO: replace by vku function?
         nv_helpers_vk::createBuffer(
             m_physical_device,
             m_device,
-            scratch_size,
-            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
-            &bottom_level_as.m_scratch_buffer,
-            &bottom_level_as.m_scratch_mem,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            sbt_size,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            &m_rt_shader_binding_table_buffer,
+            &m_rt_shader_binding_table_buffer_memory,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 
-        // TODO: replace by vku function?
-        nv_helpers_vk::createBuffer(
-            m_physical_device,
-            m_device,
-            result_size,
-            VK_BUFFER_USAGE_RAY_TRACING_BIT_NV,
-            &bottom_level_as.m_result_buffer,
-            &bottom_level_as.m_result_mem,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-        bottom_level_as_gen.Generate(
-            m_device,
-            command_buffer,
-            bottom_level_as.m_structure,
-            bottom_level_as.m_scratch_buffer,
-            0,
-            bottom_level_as.m_result_buffer,
-            bottom_level_as.m_result_mem,
-            VK_FALSE,
-            VK_NULL_HANDLE);
-
-        return bottom_level_as;
+        m_rt_sbt_generator.Generate(m_device,
+            m_rt_pipeline,
+            m_rt_shader_binding_table_buffer,
+            m_rt_shader_binding_table_buffer_memory);
     }
 
     // TODO: move to vku.
@@ -2461,6 +2502,128 @@ class HelloTriangleApplication
         vkResetFences(m_device, 1, &m_in_flight_fences[current_frame]);
 
         update_vk_uniform_buffer(image_index);
+
+        if (CurrentRenderingMode == RenderingMode::RayTracing)
+        {
+            // TODO: copied from create_vk_command_buffers(), but begin_info.flags was changed from
+            // VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT to VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT.
+
+            VkCommandBufferBeginInfo begin_info = {};
+            begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            if (vkBeginCommandBuffer(m_command_buffers[image_index], &begin_info) != VK_SUCCESS)
+                throw std::runtime_error("Failed to begin recording Vulkan command buffer");
+
+            std::array<VkClearValue, 2> clear_values;
+            clear_values[0].color = { 1.0f, 0.0f, 0.0f, 1.0f };
+            clear_values[1].depthStencil = { 1.0f, 0 };
+
+            VkRenderPassBeginInfo render_pass_begin_info = {};
+            render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            render_pass_begin_info.renderPass = m_render_pass;
+            render_pass_begin_info.framebuffer = m_swap_chain_framebuffers[image_index];
+            render_pass_begin_info.renderArea.offset = { 0, 0 };
+            render_pass_begin_info.renderArea.extent = m_swap_chain_extent;
+            render_pass_begin_info.clearValueCount = static_cast<std::uint32_t>(clear_values.size());
+            render_pass_begin_info.pClearValues = clear_values.data();
+
+            vkCmdBeginRenderPass(m_command_buffers[image_index], &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+            VkImageSubresourceRange subresource_range;
+            subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            subresource_range.baseMipLevel = 0;
+            subresource_range.levelCount = 1;
+            subresource_range.baseArrayLayer = 0;
+            subresource_range.layerCount = 1;
+
+            nv_helpers_vk::imageBarrier(
+                m_command_buffers[image_index],
+                m_rt_output_image,
+                subresource_range,
+                0,          // srcAccessMask
+                VK_ACCESS_SHADER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_GENERAL);
+
+            vkCmdBindPipeline(
+                m_command_buffers[image_index],
+                VK_PIPELINE_BIND_POINT_RAY_TRACING_NV,
+                m_rt_pipeline);
+
+            vkCmdBindDescriptorSets(
+                m_command_buffers[image_index],
+                VK_PIPELINE_BIND_POINT_RAY_TRACING_NV,
+                m_rt_pipeline_layout,
+                0,          // firstSet
+                1,          // descriptorSetCount
+                &m_rt_descriptor_set,
+                0,          // dynamicOffsetCount
+                nullptr);   // pDynamicOffsets
+
+            const VkDeviceSize ray_gen_offset = m_rt_sbt_generator.GetRayGenOffset();
+            const VkDeviceSize ray_miss_offset = m_rt_sbt_generator.GetMissOffset();
+            const VkDeviceSize ray_miss_stride = m_rt_sbt_generator.GetMissEntrySize();
+            const VkDeviceSize hit_group_offset = m_rt_sbt_generator.GetHitGroupOffset();
+            const VkDeviceSize hit_group_stride = m_rt_sbt_generator.GetHitGroupEntrySize();
+
+            vkCmdTraceRaysNV(
+                m_command_buffers[image_index],
+                m_rt_shader_binding_table_buffer, ray_gen_offset,
+                m_rt_shader_binding_table_buffer, ray_miss_offset, ray_miss_stride,
+                m_rt_shader_binding_table_buffer, hit_group_offset, hit_group_stride,
+                VK_NULL_HANDLE, 0, 0,
+                m_swap_chain_extent.width,
+                m_swap_chain_extent.height,
+                1);
+
+            nv_helpers_vk::imageBarrier(
+                m_command_buffers[image_index],
+                m_swap_chain_images[image_index],
+                subresource_range,
+                0,          // srcAccessMask
+                VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+            nv_helpers_vk::imageBarrier(
+                m_command_buffers[image_index],
+                m_rt_output_image,
+                subresource_range,
+                VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_TRANSFER_READ_BIT,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+            // TODO: move to vku?
+            VkImageCopy copy_region;
+            copy_region.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            copy_region.srcOffset = { 0, 0, 0 };
+            copy_region.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            copy_region.dstOffset = { 0, 0, 0 };
+            copy_region.extent = { m_swap_chain_extent.width, m_swap_chain_extent.height, 1 };
+            vkCmdCopyImage(
+                m_command_buffers[image_index],
+                m_rt_output_image,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                m_swap_chain_images[image_index],
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                1,
+                &copy_region);
+
+            nv_helpers_vk::imageBarrier(
+                m_command_buffers[image_index],
+                m_swap_chain_images[image_index],
+                subresource_range,
+                VK_ACCESS_TRANSFER_WRITE_BIT,
+                0,          // dstAccessMask
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+            vkCmdEndRenderPass(m_command_buffers[image_index]);
+
+            if (vkEndCommandBuffer(m_command_buffers[image_index]) != VK_SUCCESS)
+                throw std::runtime_error("Failed to end recording Vulkan command buffer");
+        }
 
         const VkSemaphore wait_semaphores[] = { m_image_available_semaphores[current_frame] };
         const VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
