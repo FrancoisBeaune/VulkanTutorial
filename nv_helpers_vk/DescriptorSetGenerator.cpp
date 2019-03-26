@@ -31,28 +31,27 @@ Contacts for feedback:
 
 #include "DescriptorSetGenerator.h"
 
-namespace nv_helpers_vk
-{
+namespace nv_helpers_vk {
 //--------------------------------------------------------------------------------------------------
 // Add a binding to the descriptor set
 void DescriptorSetGenerator::AddBinding(
-    uint32_t binding, // Slot to which the descriptor will be bound, corresponding to the layout
-                      // index in the shader
-    uint32_t descriptorCount, // Number of descriptors to bind
-    VkDescriptorType type,    // Type of the bound descriptor(s)
-    VkShaderStageFlags stage, // Shader stage at which the bound resources will be available
-    VkSampler *sampler        // Corresponding sampler, in case of textures
+    uint32_t binding,  // Slot to which the descriptor will be bound, corresponding to the layout
+                       // index in the shader
+    uint32_t           descriptorCount,  // Number of descriptors to bind
+    VkDescriptorType   type,             // Type of the bound descriptor(s)
+    VkShaderStageFlags stage,   // Shader stage at which the bound resources will be available
+    VkSampler*         sampler  // Corresponding sampler, in case of textures
 )
 {
   VkDescriptorSetLayoutBinding b = {};
-  b.binding = binding;
-  b.descriptorCount = descriptorCount;
-  b.descriptorType = type;
-  b.pImmutableSamplers = sampler;
-  b.stageFlags = stage;
+  b.binding                      = binding;
+  b.descriptorCount              = descriptorCount;
+  b.descriptorType               = type;
+  b.pImmutableSamplers           = sampler;
+  b.stageFlags                   = stage;
 
   // Sanity check to avoid binding different resources to the same binding point
-  if (m_bindings.find(binding) != m_bindings.end())
+  if(m_bindings.find(binding) != m_bindings.end())
   {
     throw std::logic_error("Binding collision");
   }
@@ -70,20 +69,20 @@ VkDescriptorPool DescriptorSetGenerator::GeneratePool(VkDevice device, uint32_t 
   // Aggregate the bindings to obtain the required size of the descriptors using that layout
   std::vector<VkDescriptorPoolSize> counters;
   counters.reserve(m_bindings.size());
-  for (const auto &b : m_bindings)
+  for(const auto& b : m_bindings)
   {
     counters.push_back({b.second.descriptorType, b.second.descriptorCount});
   }
 
   // Create the pool information descriptor, that contains the number of descriptors of each type
   VkDescriptorPoolCreateInfo poolInfo = {};
-  poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  poolInfo.poolSizeCount = static_cast<uint32_t>(counters.size());
-  poolInfo.pPoolSizes = counters.data();
-  poolInfo.maxSets = maxSets;
+  poolInfo.sType                      = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  poolInfo.poolSizeCount              = static_cast<uint32_t>(counters.size());
+  poolInfo.pPoolSizes                 = counters.data();
+  poolInfo.maxSets                    = maxSets;
 
   // Create the actual descriptor pool
-  if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &pool) != VK_SUCCESS)
+  if(vkCreateDescriptorPool(device, &poolInfo, nullptr, &pool) != VK_SUCCESS)
   {
     throw std::runtime_error("failed to create descriptor pool!");
   }
@@ -101,18 +100,18 @@ VkDescriptorSetLayout DescriptorSetGenerator::GenerateLayout(VkDevice device)
   // For production, this copy should be avoided
   std::vector<VkDescriptorSetLayoutBinding> bindings;
   bindings.reserve(m_bindings.size());
-  for (const auto &b : m_bindings)
+  for(const auto& b : m_bindings)
   {
     bindings.push_back(b.second);
   }
 
   // Create the layout from the vector of bindings
   VkDescriptorSetLayoutCreateInfo layoutInfo = {};
-  layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-  layoutInfo.pBindings = bindings.data();
+  layoutInfo.sType                           = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  layoutInfo.bindingCount                    = static_cast<uint32_t>(bindings.size());
+  layoutInfo.pBindings                       = bindings.data();
 
-  if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &layout) != VK_SUCCESS)
+  if(vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &layout) != VK_SUCCESS)
   {
     throw std::runtime_error("failed to create descriptor set layout!");
   }
@@ -121,19 +120,20 @@ VkDescriptorSetLayout DescriptorSetGenerator::GenerateLayout(VkDevice device)
 
 //--------------------------------------------------------------------------------------------------
 // Generate a descriptor set from the pool and layout
-VkDescriptorSet DescriptorSetGenerator::GenerateSet(VkDevice device, VkDescriptorPool pool,
+VkDescriptorSet DescriptorSetGenerator::GenerateSet(VkDevice              device,
+                                                    VkDescriptorPool      pool,
                                                     VkDescriptorSetLayout layout)
 {
   VkDescriptorSet set;
 
-  VkDescriptorSetLayout layouts[] = {layout};
+  VkDescriptorSetLayout       layouts[] = {layout};
   VkDescriptorSetAllocateInfo allocInfo = {};
-  allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  allocInfo.descriptorPool = pool;
-  allocInfo.descriptorSetCount = 1;
-  allocInfo.pSetLayouts = layouts;
+  allocInfo.sType                       = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  allocInfo.descriptorPool              = pool;
+  allocInfo.descriptorSetCount          = 1;
+  allocInfo.pSetLayouts                 = layouts;
 
-  if (vkAllocateDescriptorSets(device, &allocInfo, &set) != VK_SUCCESS)
+  if(vkAllocateDescriptorSets(device, &allocInfo, &set) != VK_SUCCESS)
   {
     throw std::runtime_error("failed to allocate descriptor set!");
   }
@@ -142,16 +142,18 @@ VkDescriptorSet DescriptorSetGenerator::GenerateSet(VkDevice device, VkDescripto
 
 //--------------------------------------------------------------------------------------------------
 // Bind an buffer
-void DescriptorSetGenerator::Bind(VkDescriptorSet set, uint32_t binding,
-                                  const std::vector<VkDescriptorBufferInfo> &bufferInfo)
+void DescriptorSetGenerator::Bind(VkDescriptorSet                            set,
+                                  uint32_t                                   binding,
+                                  const std::vector<VkDescriptorBufferInfo>& bufferInfo)
 {
   m_buffers.Bind(set, binding, m_bindings[binding].descriptorType, bufferInfo);
 }
 
 //--------------------------------------------------------------------------------------------------
 // Bind an image
-void DescriptorSetGenerator::Bind(VkDescriptorSet set, uint32_t binding,
-                                  const std::vector<VkDescriptorImageInfo> &imageInfo)
+void DescriptorSetGenerator::Bind(VkDescriptorSet                           set,
+                                  uint32_t                                  binding,
+                                  const std::vector<VkDescriptorImageInfo>& imageInfo)
 {
   m_images.Bind(set, binding, m_bindings[binding].descriptorType, imageInfo);
 }
@@ -159,8 +161,9 @@ void DescriptorSetGenerator::Bind(VkDescriptorSet set, uint32_t binding,
 //--------------------------------------------------------------------------------------------------
 // Bind an acceleration structure
 void DescriptorSetGenerator::Bind(
-    VkDescriptorSet set, uint32_t binding,
-    const std::vector<VkWriteDescriptorSetAccelerationStructureNV> &accelInfo)
+    VkDescriptorSet                                                 set,
+    uint32_t                                                        binding,
+    const std::vector<VkWriteDescriptorSetAccelerationStructureNV>& accelInfo)
 {
   m_accelerationStructures.Bind(set, binding, m_bindings[binding].descriptorType, accelInfo);
 }
@@ -184,4 +187,4 @@ void DescriptorSetGenerator::UpdateSetContents(VkDevice device, VkDescriptorSet 
                          m_accelerationStructures.writeDesc.data(), 0, nullptr);
 }
 
-} // namespace nv_helpers_vk
+}  // namespace nv_helpers_vk

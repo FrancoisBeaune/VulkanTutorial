@@ -83,8 +83,7 @@ return buffers;
 
 #include <vector>
 
-namespace nv_helpers_vk
-{
+namespace nv_helpers_vk {
 
 /// Helper class to generate top-level acceleration structures for raytracing
 class TopLevelASGenerator
@@ -95,34 +94,35 @@ public:
   /// index of the hit group indicating which shaders are executed upon hitting
   /// any geometry within the instance
   void AddInstance(
-      VkAccelerationStructureNV bottomLevelAS, /// Bottom-level acceleration structure containing
+      VkAccelerationStructureNV bottomLevelAS,  /// Bottom-level acceleration structure containing
                                                 /// the actual geometric data of the instance
-      const glm::mat4x4 &transform,             /// Transform matrix to apply to the instance,
+      const glm::mat4x4& transform,             /// Transform matrix to apply to the instance,
                                                 /// allowing the same bottom-level AS to be used
                                                 /// at several world-space positions
       uint32_t instanceID,                      /// Instance ID, which can be used in the shaders to
                                                 /// identify this specific instance
-      uint32_t hitGroupIndex /// Hit group index, corresponding the the index of the
-                             /// hit group in the Shader Binding Table that will be
-                             /// invocated upon hitting the geometry
+      uint32_t hitGroupIndex  /// Hit group index, corresponding the the index of the
+                              /// hit group in the Shader Binding Table that will be
+                              /// invocated upon hitting the geometry
   );
 
   /// Create the opaque acceleration structure descriptor, which will be used in the estimation of
   /// the AS size and the generation itself. The allowUpdate flag indicates if the AS will need
   /// dynamic refitting. This has to be called after adding all the instances.
   VkAccelerationStructureNV CreateAccelerationStructure(VkDevice device,
-                                                         VkBool32 allowUpdate = VK_FALSE);
+                                                        VkBool32 allowUpdate = VK_FALSE);
 
   /// Compute the size of the scratch space required to build the acceleration
   /// structure, as well as the size of the resulting structure. The allocation
   /// of the buffers is then left to the application
   void ComputeASBufferSizes(
-      VkDevice device, /*/ Device on which the build will be performed */
-      VkAccelerationStructureNV accelerationStructure, VkDeviceSize *scratchSizeInBytes,
+      VkDevice                  device, /*/ Device on which the build will be performed */
+      VkAccelerationStructureNV accelerationStructure,
+      VkDeviceSize*             scratchSizeInBytes,
       /*/ Required scratch memory on the GPU to */ /*/ build the acceleration structure */
-      VkDeviceSize *resultSizeInBytes,
+      VkDeviceSize* resultSizeInBytes,
       /*/ Required GPU memory to store the */      /*/ acceleration structure */
-      VkDeviceSize *instancesSizeInBytes           /*/ Required GPU memory to store instance */
+      VkDeviceSize* instancesSizeInBytes           /*/ Required GPU memory to store instance */
       /*/ descriptors, containing the matrices, */ /*/ indices etc. */
   );
 
@@ -131,24 +131,24 @@ public:
   /// acceleration structure in case of iterative updates. Note that the update
   /// can be done in place: the result and previousResult pointers can be the
   /// same.
-  void
-  Generate(VkDevice device,
-           VkCommandBuffer commandBuffer, /// Command list on which the build will be enqueued
-           VkAccelerationStructureNV accelerationStructure,
-           VkBuffer scratchBuffer,     /// Scratch buffer used by the builder to
-                                       /// store temporary data
-           VkDeviceSize scratchOffset, /// Offset in the scratch buffer at which the builder can
-                                       /// start writing memory
-           VkBuffer resultBuffer,      /// Result buffer storing the acceleration structure
-           VkDeviceMemory resultMem,
-           VkBuffer instancesBuffer, /// Auxiliary result buffer containing the instance
-                                     /// descriptors, has to be in upload heap
-           VkDeviceMemory instancesMem,
-           VkBool32 updateOnly = false,                        /// If true, simply refit the
-                                                               /// existing acceleration structure
-           VkAccelerationStructureNV previousResult = nullptr /// Optional previous acceleration
-                                                               /// structure, used if an
-                                                               /// iterative update is requested
+  void Generate(
+      VkDevice                  device,
+      VkCommandBuffer           commandBuffer,  /// Command list on which the build will be enqueued
+      VkAccelerationStructureNV accelerationStructure,
+      VkBuffer                  scratchBuffer,  /// Scratch buffer used by the builder to
+                                                /// store temporary data
+      VkDeviceSize scratchOffset,   /// Offset in the scratch buffer at which the builder can
+                                    /// start writing memory
+      VkBuffer       resultBuffer,  /// Result buffer storing the acceleration structure
+      VkDeviceMemory resultMem,
+      VkBuffer       instancesBuffer,  /// Auxiliary result buffer containing the instance
+                                       /// descriptors, has to be in upload heap
+      VkDeviceMemory instancesMem,
+      VkBool32       updateOnly = false,                  /// If true, simply refit the
+                                                          /// existing acceleration structure
+      VkAccelerationStructureNV previousResult = nullptr  /// Optional previous acceleration
+                                                          /// structure, used if an
+                                                          /// iterative update is requested
   );
 
 private:
@@ -175,7 +175,7 @@ private:
   /// Helper struct storing the instance data
   struct Instance
   {
-    Instance(VkAccelerationStructureNV blAS, const glm::mat4x4 &tr, uint32_t iID, uint32_t hgId);
+    Instance(VkAccelerationStructureNV blAS, const glm::mat4x4& tr, uint32_t iID, uint32_t hgId);
     /// Bottom-level AS
     VkAccelerationStructureNV bottomLevelAS;
     /// Transform matrix
@@ -198,4 +198,4 @@ private:
   /// Size of the buffer containing the TLAS
   VkDeviceSize m_resultSizeInBytes;
 };
-} // namespace nv_helpers_vk
+}  // namespace nv_helpers_vk

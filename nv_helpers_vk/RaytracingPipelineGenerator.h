@@ -59,8 +59,7 @@ rtStateObject = pipeline.Generate();
 #include <string>
 #include <vector>
 
-namespace nv_helpers_vk
-{
+namespace nv_helpers_vk {
 
 /// Helper class to create raytracing pipelines
 class RayTracingPipelineGenerator
@@ -91,8 +90,10 @@ public:
   void SetMaxRecursionDepth(uint32_t maxDepth);
 
   /// Compiles the raytracing state object
-  void Generate(VkDevice device, VkDescriptorSetLayout descriptorSetLayout, VkPipeline *pipeline,
-                VkPipelineLayout *layout);
+  void Generate(VkDevice              device,
+                VkDescriptorSetLayout descriptorSetLayout,
+                VkPipeline*           pipeline,
+                VkPipelineLayout*     layout);
 
 private:
   /// Shader stages contained in the pipeline
@@ -107,7 +108,7 @@ private:
   std::vector<VkRayTracingShaderGroupCreateInfoNV> m_shaderGroups;
 
   /// Index of the current hit group
-  uint32_t m_currentGroupIndex;
+  uint32_t m_currentGroupIndex = 0;
 
   /// True if a group description is currently started
   bool m_isHitGroupOpen = false;
@@ -116,4 +117,4 @@ private:
   uint32_t m_maxRecursionDepth = 1;
 };
 
-} // namespace nv_helpers_vk
+}  // namespace nv_helpers_vk

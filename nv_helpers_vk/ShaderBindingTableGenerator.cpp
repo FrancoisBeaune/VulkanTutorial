@@ -39,14 +39,14 @@ dispatch rays description.
 
 #include <algorithm>
 
-namespace nv_helpers_vk
-{
+namespace nv_helpers_vk {
 
 //--------------------------------------------------------------------------------------------------
 //
 // Add a ray generation program by group index, with its list of offsets or values
 void ShaderBindingTableGenerator::AddRayGenerationProgram(
-    uint32_t groupIndex, const std::vector<unsigned char> &inlineData)
+    uint32_t                          groupIndex,
+    const std::vector<unsigned char>& inlineData)
 {
   m_rayGen.emplace_back(SBTEntry(groupIndex, inlineData));
 }
@@ -54,8 +54,8 @@ void ShaderBindingTableGenerator::AddRayGenerationProgram(
 //--------------------------------------------------------------------------------------------------
 //
 // Add a miss program by group index, with its list of offsets or values
-void ShaderBindingTableGenerator::AddMissProgram(uint32_t groupIndex,
-                                                 const std::vector<unsigned char> &inlineData)
+void ShaderBindingTableGenerator::AddMissProgram(uint32_t                          groupIndex,
+                                                 const std::vector<unsigned char>& inlineData)
 {
   m_miss.emplace_back(SBTEntry(groupIndex, inlineData));
 }
@@ -63,8 +63,8 @@ void ShaderBindingTableGenerator::AddMissProgram(uint32_t groupIndex,
 //--------------------------------------------------------------------------------------------------
 //
 // Add a hit group by group index, with its list of offsets or values
-void ShaderBindingTableGenerator::AddHitGroup(uint32_t groupIndex,
-                                              const std::vector<unsigned char> &inlineData)
+void ShaderBindingTableGenerator::AddHitGroup(uint32_t                          groupIndex,
+                                              const std::vector<unsigned char>& inlineData)
 {
   m_hitGroup.emplace_back(SBTEntry(groupIndex, inlineData));
 }
@@ -72,22 +72,22 @@ void ShaderBindingTableGenerator::AddHitGroup(uint32_t groupIndex,
 //--------------------------------------------------------------------------------------------------
 //
 // Compute the size of the SBT based on the set of programs and hit groups it contains
-VkDeviceSize
-ShaderBindingTableGenerator::ComputeSBTSize(const VkPhysicalDeviceRayTracingPropertiesNV &props)
+VkDeviceSize ShaderBindingTableGenerator::ComputeSBTSize(
+    const VkPhysicalDeviceRayTracingPropertiesNV& props)
 {
   // Size of a program identifier
   m_progIdSize = props.shaderGroupHandleSize;
 
   // Compute the entry size of each program type depending on the maximum number of parameters in
   // each category
-  m_rayGenEntrySize = GetEntrySize(m_rayGen);
-  m_missEntrySize = GetEntrySize(m_miss);
+  m_rayGenEntrySize   = GetEntrySize(m_rayGen);
+  m_missEntrySize     = GetEntrySize(m_miss);
   m_hitGroupEntrySize = GetEntrySize(m_hitGroup);
 
   // The total SBT size is the sum of the entries for ray generation, miss and hit groups
-  m_sbtSize = m_rayGenEntrySize * static_cast<VkDeviceSize>(m_rayGen.size()) +
-              m_missEntrySize * static_cast<VkDeviceSize>(m_miss.size()) +
-              m_hitGroupEntrySize * static_cast<VkDeviceSize>(m_hitGroup.size());
+  m_sbtSize = m_rayGenEntrySize * static_cast<VkDeviceSize>(m_rayGen.size())
+              + m_missEntrySize * static_cast<VkDeviceSize>(m_miss.size())
+              + m_hitGroupEntrySize * static_cast<VkDeviceSize>(m_hitGroup.size());
   return m_sbtSize;
 }
 
@@ -95,31 +95,34 @@ ShaderBindingTableGenerator::ComputeSBTSize(const VkPhysicalDeviceRayTracingProp
 //
 // Build the SBT and store it into sbtBuffer, which has to be pre-allocated in zero-copy memory.
 // Access to the raytracing pipeline object is required to fetch program identifiers
-void ShaderBindingTableGenerator::Generate(VkDevice device, VkPipeline raytracingPipeline,
-                                           VkBuffer sbtBuffer, VkDeviceMemory sbtMem)
+void ShaderBindingTableGenerator::Generate(VkDevice       device,
+                                           VkPipeline     raytracingPipeline,
+                                           VkBuffer       sbtBuffer,
+                                           VkDeviceMemory sbtMem)
 {
 
-  uint32_t groupCount = static_cast<uint32_t>(m_rayGen.size()) +
-                        static_cast<uint32_t>(m_miss.size()) +
-                        static_cast<uint32_t>(m_hitGroup.size());
+  uint32_t groupCount = static_cast<uint32_t>(m_rayGen.size())
+                        + static_cast<uint32_t>(m_miss.size())
+                        + static_cast<uint32_t>(m_hitGroup.size());
 
   // Fetch all the shader handles used in the pipeline, so that they can be written in the SBT
   // Note that this could be also done by fetching the handles one by one when writing the SBT entries
-  auto shaderHandleStorage = new uint8_t[groupCount * m_progIdSize];
-  VkResult code = vkGetRayTracingShaderGroupHandlesNV(device, raytracingPipeline, 0, groupCount,
-                                                      m_progIdSize * groupCount, shaderHandleStorage);
+  auto     shaderHandleStorage = new uint8_t[groupCount * m_progIdSize];
+  VkResult code =
+      vkGetRayTracingShaderGroupHandlesNV(device, raytracingPipeline, 0, groupCount,
+                                          m_progIdSize * groupCount, shaderHandleStorage);
 
   // Map the SBT
-  void *vData;
+  void* vData;
 
   code = vkMapMemory(device, sbtMem, 0, m_sbtSize, 0, &vData);
 
-  if (code != VK_SUCCESS)
+  if(code != VK_SUCCESS)
   {
     throw std::logic_error("SBT vkMapMemory failed");
   }
 
-  auto *data = static_cast<uint8_t *>(vData);
+  auto* data = static_cast<uint8_t*>(vData);
 
   // Copy the shader identifiers followed by their resource pointers or root constants: first the
   // ray generation, then the miss shaders, and finally the set of hit groups
@@ -152,10 +155,10 @@ void ShaderBindingTableGenerator::Reset()
   m_miss.clear();
   m_hitGroup.clear();
 
-  m_rayGenEntrySize = 0;
-  m_missEntrySize = 0;
+  m_rayGenEntrySize   = 0;
+  m_missEntrySize     = 0;
   m_hitGroupEntrySize = 0;
-  m_progIdSize = 0;
+  m_progIdSize        = 0;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -232,21 +235,22 @@ VkDeviceSize ShaderBindingTableGenerator::GetHitGroupOffset() const
 // For each entry, copy the shader identifier followed by its resource pointers and/or root
 // constants in outputData, with a stride in bytes of entrySize, and returns the size in bytes
 // actually written to outputData.
-VkDeviceSize ShaderBindingTableGenerator::CopyShaderData(VkDevice device, VkPipeline pipeline,
-                                                         uint8_t *outputData,
-                                                         const std::vector<SBTEntry> &shaders,
-                                                         VkDeviceSize entrySize,
-                                                         const uint8_t *shaderHandleStorage)
+VkDeviceSize ShaderBindingTableGenerator::CopyShaderData(VkDevice                     device,
+                                                         VkPipeline                   pipeline,
+                                                         uint8_t*                     outputData,
+                                                         const std::vector<SBTEntry>& shaders,
+                                                         VkDeviceSize                 entrySize,
+                                                         const uint8_t* shaderHandleStorage)
 {
-  uint8_t *pData = outputData;
-  for (const auto &shader : shaders)
+  uint8_t* pData = outputData;
+  for(const auto& shader : shaders)
   {
     // Copy the shader identifier that was previously obtained with
     // vkGetRayTracingShaderGroupHandlesNV
     memcpy(pData, shaderHandleStorage + shader.m_groupIndex * m_progIdSize, m_progIdSize);
 
     // Copy all its resources pointers or values in bulk
-    if (!shader.m_inlineData.empty())
+    if(!shader.m_inlineData.empty())
     {
       memcpy(pData + m_progIdSize, shader.m_inlineData.data(), shader.m_inlineData.size());
     }
@@ -261,11 +265,11 @@ VkDeviceSize ShaderBindingTableGenerator::CopyShaderData(VkDevice device, VkPipe
 //
 // Compute the size of the SBT entries for a set of entries, which is determined by their maximum
 // number of parameters
-VkDeviceSize ShaderBindingTableGenerator::GetEntrySize(const std::vector<SBTEntry> &entries)
+VkDeviceSize ShaderBindingTableGenerator::GetEntrySize(const std::vector<SBTEntry>& entries)
 {
   // Find the maximum number of parameters used by a single entry
   size_t maxArgs = 0;
-  for (const auto &shader : entries)
+  for(const auto& shader : entries)
   {
     maxArgs = std::max(maxArgs, shader.m_inlineData.size());
   }
@@ -281,9 +285,10 @@ VkDeviceSize ShaderBindingTableGenerator::GetEntrySize(const std::vector<SBTEntr
 //--------------------------------------------------------------------------------------------------
 //
 //
-ShaderBindingTableGenerator::SBTEntry::SBTEntry(uint32_t groupIndex,
+ShaderBindingTableGenerator::SBTEntry::SBTEntry(uint32_t             groupIndex,
                                                 std::vector<uint8_t> inlineData)
-    : m_groupIndex(groupIndex), m_inlineData(std::move(inlineData))
+    : m_groupIndex(groupIndex)
+    , m_inlineData(std::move(inlineData))
 {
 }
-} // namespace nv_helpers_vk
+}  // namespace nv_helpers_vk

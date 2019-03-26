@@ -109,31 +109,32 @@ desc.HitGroupTable.StrideInBytes = m_sbtHelper.GetHitGroupEntrySize();
 #include "vulkan/vulkan.h"
 #include <vector>
 
-namespace nv_helpers_vk
-{
+namespace nv_helpers_vk {
 /// Helper class to create and maintain a Shader Binding Table
 class ShaderBindingTableGenerator
 {
 public:
   /// Add a ray generation program by name, with its list of data pointers or values according to
   /// the layout of its root signature
-  void AddRayGenerationProgram(uint32_t groupIndex, const std::vector<unsigned char> &inlineData);
+  void AddRayGenerationProgram(uint32_t groupIndex, const std::vector<unsigned char>& inlineData);
 
   /// Add a miss program by name, with its list of data pointers or values according to
   /// the layout of its root signature
-  void AddMissProgram(uint32_t groupIndex, const std::vector<unsigned char> &inlineData);
+  void AddMissProgram(uint32_t groupIndex, const std::vector<unsigned char>& inlineData);
 
   /// Add a hit group by name, with its list of data pointers or values according to
   /// the layout of its root signature
-  void AddHitGroup(uint32_t groupIndex, const std::vector<unsigned char> &inlineData);
+  void AddHitGroup(uint32_t groupIndex, const std::vector<unsigned char>& inlineData);
 
   /// Compute the size of the SBT based on the set of programs and hit groups it contains
-  VkDeviceSize ComputeSBTSize(const VkPhysicalDeviceRayTracingPropertiesNV &props);
+  VkDeviceSize ComputeSBTSize(const VkPhysicalDeviceRayTracingPropertiesNV& props);
 
   /// Build the SBT and store it into sbtBuffer, which has to be pre-allocated on the upload heap.
   /// Access to the raytracing pipeline object is required to fetch program identifiers using their
   /// names
-  void Generate(VkDevice device, VkPipeline raytracingPipeline, VkBuffer sbtBuffer,
+  void Generate(VkDevice       device,
+                VkPipeline     raytracingPipeline,
+                VkBuffer       sbtBuffer,
                 VkDeviceMemory sbtMem);
 
   /// Reset the sets of programs and hit groups
@@ -170,20 +171,23 @@ private:
   {
     SBTEntry(uint32_t groupIndex, std::vector<unsigned char> inlineData);
 
-    uint32_t m_groupIndex;
+    uint32_t                         m_groupIndex;
     const std::vector<unsigned char> m_inlineData;
   };
 
   /// For each entry, copy the shader identifier followed by its resource pointers and/or root
   /// constants in outputData, with a stride in bytes of entrySize, and returns the size in bytes
   /// actually written to outputData.
-  VkDeviceSize CopyShaderData(VkDevice device, VkPipeline pipeline, uint8_t *outputData,
-                              const std::vector<SBTEntry> &shaders, VkDeviceSize entrySize,
-                              const uint8_t *shaderHandleStorage);
+  VkDeviceSize CopyShaderData(VkDevice                     device,
+                              VkPipeline                   pipeline,
+                              uint8_t*                     outputData,
+                              const std::vector<SBTEntry>& shaders,
+                              VkDeviceSize                 entrySize,
+                              const uint8_t*               shaderHandleStorage);
 
   /// Compute the size of the SBT entries for a set of entries, which is determined by the maximum
   /// number of parameters of their root signature
-  VkDeviceSize GetEntrySize(const std::vector<SBTEntry> &entries);
+  VkDeviceSize GetEntrySize(const std::vector<SBTEntry>& entries);
 
   /// Ray generation shader entries
   std::vector<SBTEntry> m_rayGen;
@@ -204,4 +208,4 @@ private:
   VkDeviceSize m_progIdSize;
   VkDeviceSize m_sbtSize;
 };
-} // namespace nv_helpers_vk
+}  // namespace nv_helpers_vk

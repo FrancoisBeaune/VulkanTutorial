@@ -31,21 +31,21 @@ Contacts for feedback:
 
 #include "VKHelpers.h"
 
-namespace nv_helpers_vk
-{
+namespace nv_helpers_vk {
 
 //--------------------------------------------------------------------------------------------------
 //
-uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter,
+uint32_t findMemoryType(VkPhysicalDevice      physicalDevice,
+                        uint32_t              typeFilter,
                         VkMemoryPropertyFlags properties)
 {
   VkPhysicalDeviceMemoryProperties memProperties;
   vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
 
-  for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++)
+  for(uint32_t i = 0; i < memProperties.memoryTypeCount; i++)
   {
-    if ((typeFilter & (1 << i)) &&
-        (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
+    if((typeFilter & (1 << i))
+       && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
     {
       return i;
     }
@@ -56,17 +56,23 @@ uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter,
 
 //--------------------------------------------------------------------------------------------------
 //
-void createBuffer(VkPhysicalDevice physicalDevice, VkDevice device, VkDeviceSize sizeInBytes,
-                  VkBufferUsageFlags usage,
-                  VkBuffer *buffer, VkDeviceMemory *bufferMemory, VkMemoryPropertyFlags memPropFlags /*= VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT*/)
+void createBuffer(
+    VkPhysicalDevice   physicalDevice,
+    VkDevice           device,
+    VkDeviceSize       sizeInBytes,
+    VkBufferUsageFlags usage,
+    VkBuffer*          buffer,
+    VkDeviceMemory*    bufferMemory,
+    VkMemoryPropertyFlags
+        memPropFlags /*= VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT*/)
 {
   VkBufferCreateInfo bufferInfo = {};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = sizeInBytes;
-  bufferInfo.usage = usage;
-  bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  bufferInfo.sType              = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  bufferInfo.size               = sizeInBytes;
+  bufferInfo.usage              = usage;
+  bufferInfo.sharingMode        = VK_SHARING_MODE_EXCLUSIVE;
 
-  if (vkCreateBuffer(device, &bufferInfo, nullptr, buffer) != VK_SUCCESS)
+  if(vkCreateBuffer(device, &bufferInfo, nullptr, buffer) != VK_SUCCESS)
   {
     throw std::runtime_error("failed to create buffer!");
   }
@@ -75,12 +81,12 @@ void createBuffer(VkPhysicalDevice physicalDevice, VkDevice device, VkDeviceSize
   vkGetBufferMemoryRequirements(device, *buffer, &memRequirements);
 
   VkMemoryAllocateInfo allocInfo = {};
-  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocInfo.allocationSize = memRequirements.size;
+  allocInfo.sType                = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  allocInfo.allocationSize       = memRequirements.size;
   allocInfo.memoryTypeIndex =
       findMemoryType(physicalDevice, memRequirements.memoryTypeBits, memPropFlags);
 
-  if (vkAllocateMemory(device, &allocInfo, nullptr, bufferMemory) != VK_SUCCESS)
+  if(vkAllocateMemory(device, &allocInfo, nullptr, bufferMemory) != VK_SUCCESS)
   {
     throw std::runtime_error("failed to allocate buffer memory!");
   }
@@ -89,25 +95,29 @@ void createBuffer(VkPhysicalDevice physicalDevice, VkDevice device, VkDeviceSize
 
 //--------------------------------------------------------------------------------------------------
 //
-void imageBarrier(VkCommandBuffer commandBuffer, VkImage image,
-                  VkImageSubresourceRange &subresourceRange, VkAccessFlags srcAccessMask,
-                  VkAccessFlags dstAccessMask, VkImageLayout oldLayout, VkImageLayout newLayout)
+void imageBarrier(VkCommandBuffer          commandBuffer,
+                  VkImage                  image,
+                  VkImageSubresourceRange& subresourceRange,
+                  VkAccessFlags            srcAccessMask,
+                  VkAccessFlags            dstAccessMask,
+                  VkImageLayout            oldLayout,
+                  VkImageLayout            newLayout)
 {
   VkImageMemoryBarrier imageMemoryBarrier;
-  imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  imageMemoryBarrier.pNext = nullptr;
-  imageMemoryBarrier.srcAccessMask = srcAccessMask;
-  imageMemoryBarrier.dstAccessMask = dstAccessMask;
-  imageMemoryBarrier.oldLayout = oldLayout;
-  imageMemoryBarrier.newLayout = newLayout;
+  imageMemoryBarrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  imageMemoryBarrier.pNext               = nullptr;
+  imageMemoryBarrier.srcAccessMask       = srcAccessMask;
+  imageMemoryBarrier.dstAccessMask       = dstAccessMask;
+  imageMemoryBarrier.oldLayout           = oldLayout;
+  imageMemoryBarrier.newLayout           = newLayout;
   imageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   imageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  imageMemoryBarrier.image = image;
-  imageMemoryBarrier.subresourceRange = subresourceRange;
+  imageMemoryBarrier.image               = image;
+  imageMemoryBarrier.subresourceRange    = subresourceRange;
 
   vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1,
                        &imageMemoryBarrier);
 }
 
-} // namespace nv_helpers_vk
+}  // namespace nv_helpers_vk

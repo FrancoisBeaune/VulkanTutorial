@@ -48,8 +48,7 @@ buffer needs to be kept until the command list execution is finished.
 #include "TopLevelASGenerator.h"
 #include "VKHelpers.h"
 
-namespace nv_helpers_vk
-{
+namespace nv_helpers_vk {
 
 //--------------------------------------------------------------------------------------------------
 //
@@ -60,14 +59,14 @@ namespace nv_helpers_vk
 void TopLevelASGenerator::AddInstance(
     VkAccelerationStructureNV bottomLevelAS,  // Bottom-level acceleration structure containing the
                                               // actual geometric data of the instance
-    const glm::mat4x4 &transform, // Transform matrix to apply to the instance, allowing the
-                                  // same bottom-level AS to be used at several world-space
-                                  // positions
-    uint32_t instanceID,          // Instance ID, which can be used in the shaders to
-                                  // identify this specific instance
-    uint32_t hitGroupIndex        // Hit group index, corresponding the the index of the
-                                  // hit group in the Shader Binding Table that will be
-                                  // invocated upon hitting the geometry
+    const glm::mat4x4& transform,  // Transform matrix to apply to the instance, allowing the
+    // same bottom-level AS to be used at several world-space
+    // positions
+    uint32_t instanceID,    // Instance ID, which can be used in the shaders to
+                            // identify this specific instance
+    uint32_t hitGroupIndex  // Hit group index, corresponding the the index of the
+                            // hit group in the Shader Binding Table that will be
+                            // invocated upon hitting the geometry
 )
 {
   m_instances.emplace_back(Instance(bottomLevelAS, transform, instanceID, hitGroupIndex));
@@ -78,34 +77,35 @@ void TopLevelASGenerator::AddInstance(
 // Create the opaque acceleration structure descriptor, which will be used in the estimation of
 // the AS size and the generation itself. The allowUpdate flag indicates if the AS will need
 // dynamic refitting. This has to be called after adding all the instances.
-VkAccelerationStructureNV
-TopLevelASGenerator::CreateAccelerationStructure(VkDevice device,
-                                                 VkBool32 allowUpdate /* = VK_FALSE */)
+VkAccelerationStructureNV TopLevelASGenerator::CreateAccelerationStructure(
+    VkDevice device,
+    VkBool32 allowUpdate /* = VK_FALSE */)
 {
   // The generated AS can support iterative updates. This may change the final
   // size of the AS as well as the temporary memory requirements, and hence has
   // to be set before the actual build
   m_flags = allowUpdate ? VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_NV : 0;
 
-  VkAccelerationStructureCreateInfoNV accelerationStructureInfo = {};
-  accelerationStructureInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV;
-  accelerationStructureInfo.pNext = nullptr;
-  accelerationStructureInfo.info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV;
-  accelerationStructureInfo.info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_NV;
-  accelerationStructureInfo.info.flags = m_flags;
+  VkAccelerationStructureInfoNV info{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV};
+  info.type          = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_NV;
+  info.flags         = m_flags;
+  info.instanceCount = static_cast<uint32_t>(
+      m_instances.size());  // The descriptor already contains the number of instances
+  info.geometryCount = 0;   // Since this is a top-level AS, it does not contain any geometry
+  info.pGeometries   = VK_NULL_HANDLE;
+
+  VkAccelerationStructureCreateInfoNV accelerationStructureInfo{
+      VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV};
+  accelerationStructureInfo.sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV;
+  accelerationStructureInfo.info          = info;
+  accelerationStructureInfo.pNext         = nullptr;
   accelerationStructureInfo.compactedSize = 0;
-  // The descriptor already contains the number of instances
-  accelerationStructureInfo.info.instanceCount = static_cast<uint32_t>(m_instances.size());
-  // Since this is a top-level AS, it does not contain any geometry
-  accelerationStructureInfo.info.geometryCount = 0;
-  accelerationStructureInfo.info.pGeometries = VK_NULL_HANDLE;
 
   VkAccelerationStructureNV accelerationStructure;
-
   VkResult code = vkCreateAccelerationStructureNV(device, &accelerationStructureInfo, nullptr,
-                                                   &accelerationStructure);
+                                                  &accelerationStructure);
 
-  if (code != VK_SUCCESS)
+  if(code != VK_SUCCESS)
   {
     throw std::logic_error("vkCreateAccelerationStructureNV failed");
   }
@@ -119,12 +119,13 @@ TopLevelASGenerator::CreateAccelerationStructure(VkDevice device,
 // structure, as well as the size of the resulting structure. The allocation of
 // the buffers is then left to the application
 void TopLevelASGenerator::ComputeASBufferSizes(
-    VkDevice device, /* Device on which the build will be performed */
-    VkAccelerationStructureNV accelerationStructure, VkDeviceSize *scratchSizeInBytes,
+    VkDevice                  device, /* Device on which the build will be performed */
+    VkAccelerationStructureNV accelerationStructure,
+    VkDeviceSize*             scratchSizeInBytes,
     /* Required scratch memory on the GPU to build the acceleration structure */
-    VkDeviceSize *resultSizeInBytes,
+    VkDeviceSize* resultSizeInBytes,
     /* Required GPU memory to store the acceleration structure */
-    VkDeviceSize *instancesSizeInBytes /* Required GPU memory to store instance */
+    VkDeviceSize* instancesSizeInBytes /* Required GPU memory to store instance */
                                        /* descriptors, containing the matrices, indices etc. */
 )
 {
@@ -133,14 +134,14 @@ void TopLevelASGenerator::ComputeASBufferSizes(
   memoryRequirementsInfo.sType =
       VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_INFO_NV;
   memoryRequirementsInfo.pNext = nullptr;
-  memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_OBJECT_NV;
+  memoryRequirementsInfo.type  = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_OBJECT_NV;
   memoryRequirementsInfo.accelerationStructure = accelerationStructure;
 
   // Query the memory requirements. Note that the number of instances in the AS has already
   // been provided when creating the AS descriptor
   VkMemoryRequirements2 memoryRequirements;
   vkGetAccelerationStructureMemoryRequirementsNV(device, &memoryRequirementsInfo,
-                                                  &memoryRequirements);
+                                                 &memoryRequirements);
 
   // Size of the resulting acceleration structure
   m_resultSizeInBytes = memoryRequirements.memoryRequirements.size;
@@ -151,19 +152,21 @@ void TopLevelASGenerator::ComputeASBufferSizes(
                                                  &memoryRequirements);
   m_scratchSizeInBytes = memoryRequirements.memoryRequirements.size;
 
-  memoryRequirementsInfo.type = VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_UPDATE_SCRATCH_NV;
+  memoryRequirementsInfo.type =
+      VK_ACCELERATION_STRUCTURE_MEMORY_REQUIREMENTS_TYPE_UPDATE_SCRATCH_NV;
   vkGetAccelerationStructureMemoryRequirementsNV(device, &memoryRequirementsInfo,
-	  &memoryRequirements);
+                                                 &memoryRequirements);
 
   m_scratchSizeInBytes = m_scratchSizeInBytes > memoryRequirements.memoryRequirements.size ?
-						 m_scratchSizeInBytes : memoryRequirements.memoryRequirements.size;
+                             m_scratchSizeInBytes :
+                             memoryRequirements.memoryRequirements.size;
 
-  *resultSizeInBytes = m_resultSizeInBytes;
+  *resultSizeInBytes  = m_resultSizeInBytes;
   *scratchSizeInBytes = m_scratchSizeInBytes;
 
   // Amount of memory required to store the instance descriptors
   m_instanceDescsSizeInBytes = m_instances.size() * sizeof(VkGeometryInstance);
-  *instancesSizeInBytes = m_instanceDescsSizeInBytes;
+  *instancesSizeInBytes      = m_instanceDescsSizeInBytes;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -173,39 +176,40 @@ void TopLevelASGenerator::ComputeASBufferSizes(
 // acceleration structure in case of iterative updates. Note that the update can
 // be done in place: the result and previousResult descriptors can be the same.
 void TopLevelASGenerator::Generate(
-    VkDevice device,               // Device on which the generation will be performed
-    VkCommandBuffer commandBuffer, // Command list on which the build will be enqueued
+    VkDevice                  device,         // Device on which the generation will be performed
+    VkCommandBuffer           commandBuffer,  // Command list on which the build will be enqueued
     VkAccelerationStructureNV accelerationStructure,
-    VkBuffer scratchBuffer, // Scratch buffer used by the builder to
-                            // store temporary data
+    VkBuffer                  scratchBuffer,  // Scratch buffer used by the builder to
+                                              // store temporary data
     VkDeviceSize
-        scratchOffset, // Offset in the scratch buffer at which the builder can start writing memory
-    VkBuffer resultBuffer, // Result buffer storing the acceleration structure
+                   scratchOffset,  // Offset in the scratch buffer at which the builder can start writing memory
+    VkBuffer       resultBuffer,  // Result buffer storing the acceleration structure
     VkDeviceMemory resultMem,
-    VkBuffer instancesBuffer, // Auxiliary result buffer containing the instance
-                              // descriptors, has to be in upload heap
-    VkDeviceMemory instancesMem, VkBool32 updateOnly /*= false*/, // If true, simply refit the
-                                                                  // existing acceleration structure
-    VkAccelerationStructureNV previousResult /*= nullptr*/       // Optional previous acceleration
-                                                                  // structure, used if an iterative
-                                                                  // update is requested
+    VkBuffer       instancesBuffer,  // Auxiliary result buffer containing the instance
+                                     // descriptors, has to be in upload heap
+    VkDeviceMemory instancesMem,
+    VkBool32       updateOnly /*= false*/,                  // If true, simply refit the
+                                                            // existing acceleration structure
+    VkAccelerationStructureNV previousResult /*= nullptr*/  // Optional previous acceleration
+                                                            // structure, used if an iterative
+                                                            // update is requested
 )
 {
 
   // For each instance, build the corresponding instance descriptor
   std::vector<VkGeometryInstance> geometryInstances;
-  for (const auto &inst : m_instances)
+  for(const auto& inst : m_instances)
   {
     uint64_t accelerationStructureHandle = 0;
-    VkResult code = vkGetAccelerationStructureHandleNV(
-        device, inst.bottomLevelAS, sizeof(uint64_t), &accelerationStructureHandle);
-    if (code != VK_SUCCESS)
+    VkResult code = vkGetAccelerationStructureHandleNV(device, inst.bottomLevelAS, sizeof(uint64_t),
+                                                       &accelerationStructureHandle);
+    if(code != VK_SUCCESS)
     {
       throw std::logic_error("vkGetAccelerationStructureHandleNV failed");
     }
 
     VkGeometryInstance gInst;
-    glm::mat4x4 transp = glm::transpose(inst.transform);
+    glm::mat4x4        transp = glm::transpose(inst.transform);
     memcpy(gInst.transform, &transp, sizeof(gInst.transform));
     gInst.instanceId = inst.instanceID;
     // The visibility mask is always set of 0xFF, but if some instances would need to be ignored in
@@ -215,71 +219,76 @@ void TopLevelASGenerator::Generate(
     // the geometry
     gInst.instanceOffset = inst.hitGroupIndex;
     // Disable culling - more fine control could be provided by the application
-    gInst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;
+    gInst.flags                       = VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV;
     gInst.accelerationStructureHandle = accelerationStructureHandle;
     geometryInstances.push_back(gInst);
   }
 
   // Copy the instance descriptors into the provided mappable buffer
   VkDeviceSize instancesBufferSize = geometryInstances.size() * sizeof(VkGeometryInstance);
-  void *data;
+  void*        data;
   vkMapMemory(device, instancesMem, 0, instancesBufferSize, 0, &data);
   memcpy(data, geometryInstances.data(), instancesBufferSize);
   vkUnmapMemory(device, instancesMem);
 
   // Bind the acceleration structure descriptor to the actual memory that will store the AS itself
   VkBindAccelerationStructureMemoryInfoNV bindInfo;
-  bindInfo.sType = VK_STRUCTURE_TYPE_BIND_ACCELERATION_STRUCTURE_MEMORY_INFO_NV;
-  bindInfo.pNext = nullptr;
+  bindInfo.sType                 = VK_STRUCTURE_TYPE_BIND_ACCELERATION_STRUCTURE_MEMORY_INFO_NV;
+  bindInfo.pNext                 = nullptr;
   bindInfo.accelerationStructure = accelerationStructure;
-  bindInfo.memory = resultMem;
-  bindInfo.memoryOffset = 0;
-  bindInfo.deviceIndexCount = 0;
-  bindInfo.pDeviceIndices = nullptr;
+  bindInfo.memory                = resultMem;
+  bindInfo.memoryOffset          = 0;
+  bindInfo.deviceIndexCount      = 0;
+  bindInfo.pDeviceIndices        = nullptr;
 
   VkResult code = vkBindAccelerationStructureMemoryNV(device, 1, &bindInfo);
 
-  if (code != VK_SUCCESS)
+  if(code != VK_SUCCESS)
   {
     throw std::logic_error("vkBindAccelerationStructureMemoryNV failed");
   }
 
   // Build the acceleration structure and store it in the result memory
   VkAccelerationStructureInfoNV buildInfo;
-  buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV;
-  buildInfo.pNext = nullptr;
-  buildInfo.flags = m_flags;
-  buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_NV;
+  buildInfo.sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV;
+  buildInfo.pNext         = nullptr;
+  buildInfo.flags         = m_flags;
+  buildInfo.type          = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_NV;
   buildInfo.instanceCount = static_cast<uint32_t>(geometryInstances.size());
   buildInfo.geometryCount = 0;
-  buildInfo.pGeometries = nullptr;
+  buildInfo.pGeometries   = nullptr;
 
-  vkCmdBuildAccelerationStructureNV(
-	  commandBuffer, &buildInfo, instancesBuffer, 0,
-	  updateOnly, accelerationStructure, updateOnly ? previousResult : VK_NULL_HANDLE,
-	  scratchBuffer, scratchOffset);
+  vkCmdBuildAccelerationStructureNV(commandBuffer, &buildInfo, instancesBuffer, 0, updateOnly,
+                                    accelerationStructure,
+                                    updateOnly ? previousResult : VK_NULL_HANDLE, scratchBuffer,
+                                    scratchOffset);
 
   // Ensure that the build will be finished before using the AS using a barrier
   VkMemoryBarrier memoryBarrier;
   memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
   memoryBarrier.pNext = nullptr;
-  memoryBarrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV |
-                                VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV;
-  memoryBarrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV |
-                                VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV;
+  memoryBarrier.srcAccessMask =
+      VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV;
+  memoryBarrier.dstAccessMask =
+      VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV;
 
-  vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_NV,
-                       VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_NV, 0, 1, &memoryBarrier, 0, nullptr, 0,
-                       nullptr);
+  vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_NV,
+                       VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_NV, 0, 1, &memoryBarrier,
+                       0, nullptr, 0, nullptr);
 }
 
 //--------------------------------------------------------------------------------------------------
 //
 //
-TopLevelASGenerator::Instance::Instance(VkAccelerationStructureNV blAS, const glm::mat4x4 &tr,
-                                        uint32_t iID, uint32_t hgId)
-    : bottomLevelAS(blAS), transform(tr), instanceID(iID), hitGroupIndex(hgId)
+TopLevelASGenerator::Instance::Instance(VkAccelerationStructureNV blAS,
+                                        const glm::mat4x4&        tr,
+                                        uint32_t                  iID,
+                                        uint32_t                  hgId)
+    : bottomLevelAS(blAS)
+    , transform(tr)
+    , instanceID(iID)
+    , hitGroupIndex(hgId)
 {
 }
 
-} // namespace nv_helpers_vk
+}  // namespace nv_helpers_vk

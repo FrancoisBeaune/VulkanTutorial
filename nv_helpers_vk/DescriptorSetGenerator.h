@@ -35,20 +35,19 @@ Contacts for feedback:
 #include <array>
 #include <unordered_map>
 
-namespace nv_helpers_vk
-{
+namespace nv_helpers_vk {
 /// Helper class generating consistent descriptor pools, layouts and sets
 class DescriptorSetGenerator
 {
 public:
   /// Add a binding to the descriptor set
   void AddBinding(
-      uint32_t binding, /// Slot to which the descriptor will be bound, corresponding to the layout
-                        /// index in the shader
-      uint32_t descriptorCount,    /// Number of descriptors to bind
-      VkDescriptorType type,       /// Type of the bound descriptor(s)
-      VkShaderStageFlags stage,    /// Shader stage at which the bound resources will be available
-      VkSampler *sampler = nullptr /// Corresponding sampler, in case of textures
+      uint32_t binding,  /// Slot to which the descriptor will be bound, corresponding to the layout
+                         /// index in the shader
+      uint32_t           descriptorCount,  /// Number of descriptors to bind
+      VkDescriptorType   type,             /// Type of the bound descriptor(s)
+      VkShaderStageFlags stage,  /// Shader stage at which the bound resources will be available
+      VkSampler*         sampler = nullptr  /// Corresponding sampler, in case of textures
   );
 
   /// Once the bindings have been added, this generates the descriptor pool with enough space to
@@ -64,13 +63,13 @@ public:
 
   /// Store the information to write into one descriptor set entry: the number of descriptors of the
   /// entry, and where in the descriptor the buffer information should be written
-  template <typename T /// Type of the descriptor info, such as VkDescriptorBufferInfo
+  template <typename T  /// Type of the descriptor info, such as VkDescriptorBufferInfo
             ,
-            uint32_t offset /// Offset in the VkWriteDescriptorSet structure where the descriptor
-                            /// info should be written, which depends on the type of the info. For
-                            /// example, a VkDescriptorBufferInfo needs to be written in the
-                            /// pBufferInfo member, while VkDescriptorImageInfo has to be written in
-                            /// pImageInfo
+            uint32_t offset  /// Offset in the VkWriteDescriptorSet structure where the descriptor
+                             /// info should be written, which depends on the type of the info. For
+                             /// example, a VkDescriptorBufferInfo needs to be written in the
+            /// pBufferInfo member, while VkDescriptorImageInfo has to be written in
+            /// pImageInfo
             >
   struct WriteInfo
   {
@@ -85,41 +84,41 @@ public:
     /// the VkWriteDescriptorSet structure
     void SetPointers()
     {
-      for (size_t i = 0; i < writeDesc.size(); i++)
+      for(size_t i = 0; i < writeDesc.size(); i++)
       {
-        T **dest = reinterpret_cast<T **>(reinterpret_cast<uint8_t *>(&writeDesc[i]) + offset);
-        *dest = contents[i].data();
+        T** dest = reinterpret_cast<T**>(reinterpret_cast<uint8_t*>(&writeDesc[i]) + offset);
+        *dest    = contents[i].data();
       }
     }
     /// Bind a vector of info descriptors to a slot in the descriptor set
-    void Bind(VkDescriptorSet set,       /// Target descriptor set
-              uint32_t binding,          /// Slot in the descriptor set the infos will be bound to
-              VkDescriptorType type,     /// Type of the descriptor
-              const std::vector<T> &info /// Descriptor infos to bind
+    void Bind(VkDescriptorSet  set,       /// Target descriptor set
+              uint32_t         binding,   /// Slot in the descriptor set the infos will be bound to
+              VkDescriptorType type,      /// Type of the descriptor
+              const std::vector<T>& info  /// Descriptor infos to bind
     )
     {
       // Initialize the descriptor write, keeping all the resource pointers to NULL since they will
       // be set by SetPointers once all resources have been bound
       VkWriteDescriptorSet descriptorWrite = {};
-      descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-      descriptorWrite.dstSet = set;
-      descriptorWrite.dstBinding = binding;
-      descriptorWrite.dstArrayElement = 0;
-      descriptorWrite.descriptorType = type;
-      descriptorWrite.descriptorCount = static_cast<uint32_t>(info.size());
-      descriptorWrite.pBufferInfo = VK_NULL_HANDLE;
-      descriptorWrite.pImageInfo = VK_NULL_HANDLE;
-      descriptorWrite.pTexelBufferView = VK_NULL_HANDLE;
-      descriptorWrite.pNext = VK_NULL_HANDLE;
+      descriptorWrite.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      descriptorWrite.dstSet               = set;
+      descriptorWrite.dstBinding           = binding;
+      descriptorWrite.dstArrayElement      = 0;
+      descriptorWrite.descriptorType       = type;
+      descriptorWrite.descriptorCount      = static_cast<uint32_t>(info.size());
+      descriptorWrite.pBufferInfo          = VK_NULL_HANDLE;
+      descriptorWrite.pImageInfo           = VK_NULL_HANDLE;
+      descriptorWrite.pTexelBufferView     = VK_NULL_HANDLE;
+      descriptorWrite.pNext                = VK_NULL_HANDLE;
 
       // If the binding point had already been used in a Bind call, replace the binding info
       // Linear search, not so great - hopefully not too many binding points
-      for (size_t i = 0; i < writeDesc.size(); i++)
+      for(size_t i = 0; i < writeDesc.size(); i++)
       {
-        if (writeDesc[i].dstBinding == binding)
+        if(writeDesc[i].dstBinding == binding)
         {
           writeDesc[i] = descriptorWrite;
-          contents[i] = info;
+          contents[i]  = info;
           return;
         }
       }
@@ -130,16 +129,19 @@ public:
   };
 
   /// Bind a buffer
-  void Bind(VkDescriptorSet set, uint32_t binding,
-            const std::vector<VkDescriptorBufferInfo> &bufferInfo);
+  void Bind(VkDescriptorSet                            set,
+            uint32_t                                   binding,
+            const std::vector<VkDescriptorBufferInfo>& bufferInfo);
 
   /// Bind an image
-  void Bind(VkDescriptorSet set, uint32_t binding,
-            const std::vector<VkDescriptorImageInfo> &imageInfo);
+  void Bind(VkDescriptorSet                           set,
+            uint32_t                                  binding,
+            const std::vector<VkDescriptorImageInfo>& imageInfo);
 
   /// Bind an acceleration structure
-  void Bind(VkDescriptorSet set, uint32_t binding,
-            const std::vector<VkWriteDescriptorSetAccelerationStructureNV> &accelInfo);
+  void Bind(VkDescriptorSet                                                 set,
+            uint32_t                                                        binding,
+            const std::vector<VkWriteDescriptorSetAccelerationStructureNV>& accelInfo);
 
   /// Actually write the binding info into the descriptor set
   void UpdateSetContents(VkDevice device, VkDescriptorSet set);
@@ -160,4 +162,4 @@ private:
       m_accelerationStructures;
 };
 
-} // namespace nv_helpers_vk
+}  // namespace nv_helpers_vk
