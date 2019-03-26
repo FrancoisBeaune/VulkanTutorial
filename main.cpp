@@ -258,6 +258,8 @@ class HelloTriangleApplication
 
   private:
     GLFWwindow*                                 m_window;
+    int                                         m_window_width;
+    int                                         m_window_height;
 
     VkInstance                                  m_instance;
     VkDebugUtilsMessengerEXT                    m_debug_messenger;
@@ -352,6 +354,7 @@ class HelloTriangleApplication
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
         m_window = glfwCreateWindow(WindowWidth, WindowHeight, "Vulkan Tutorial", nullptr, nullptr);
+        glfwGetFramebufferSize(m_window, &m_window_width, &m_window_height);
 
         glfwSetWindowUserPointer(m_window, this);
         glfwSetFramebufferSizeCallback(m_window, framebuffer_resize_callback);
@@ -736,13 +739,13 @@ class HelloTriangleApplication
 #endif
     }
 
-    VkExtent2D choose_vk_swap_extent(const VkSurfaceCapabilitiesKHR& capabilities)
+    static VkExtent2D choose_vk_swap_extent(
+        const VkSurfaceCapabilitiesKHR& capabilities,
+        const int                       window_width,
+        const int                       window_height)
     {
         if (capabilities.currentExtent.width != std::numeric_limits<std::uint32_t>::max())
             return capabilities.currentExtent;
-
-        int window_width, window_height;
-        glfwGetFramebufferSize(m_window, &window_width, &window_height);
 
         VkExtent2D actual_extent =
         {
@@ -940,7 +943,7 @@ class HelloTriangleApplication
 
         const VkSurfaceFormatKHR surface_format = choose_vk_swap_surface_format(swap_chain_support.m_formats);
         const VkPresentModeKHR present_mode = choose_vk_swap_present_mode(swap_chain_support.m_present_modes);
-        const VkExtent2D extent = choose_vk_swap_extent(swap_chain_support.m_capabilities);
+        const VkExtent2D extent = choose_vk_swap_extent(swap_chain_support.m_capabilities, m_window_width, m_window_height);
 
         std::uint32_t image_count = swap_chain_support.m_capabilities.minImageCount + 1;
         if (swap_chain_support.m_capabilities.maxImageCount > 0)
@@ -2449,6 +2452,16 @@ class HelloTriangleApplication
     {
         vkWaitForFences(m_device, 1, &m_in_flight_fences[current_frame], VK_TRUE, std::numeric_limits<std::uint64_t>::max());
 
+        if (m_window_width == 0 || m_window_height == 0 || m_framebuffer_resized)
+        {
+            glfwGetFramebufferSize(m_window, &m_window_width, &m_window_height);
+            if (m_window_width == 0 || m_window_height == 0)
+                return;
+
+            m_framebuffer_resized = false;
+            recreate_vk_swap_chain();
+        }
+
         std::uint32_t image_index;
         VkResult result =
             vkAcquireNextImageKHR(
@@ -2458,6 +2471,7 @@ class HelloTriangleApplication
                 m_image_available_semaphores[current_frame],
                 VK_NULL_HANDLE,
                 &image_index);
+
         if (result == VK_ERROR_OUT_OF_DATE_KHR)
         {
             recreate_vk_swap_chain();
@@ -2548,51 +2562,6 @@ class HelloTriangleApplication
                 m_swap_chain_extent.height,
                 1);
 
-#if 0
-            nv_helpers_vk::imageBarrier(
-                m_command_buffers[image_index],
-                m_swap_chain_images[image_index],
-                subresource_range,
-                0,          // srcAccessMask
-                VK_ACCESS_TRANSFER_WRITE_BIT,
-                VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-            nv_helpers_vk::imageBarrier(
-                m_command_buffers[image_index],
-                m_rt_output_image,
-                subresource_range,
-                VK_ACCESS_SHADER_WRITE_BIT,
-                VK_ACCESS_TRANSFER_READ_BIT,
-                VK_IMAGE_LAYOUT_GENERAL,
-                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-
-            // TODO: move to vku?
-            VkImageCopy copy_region;
-            copy_region.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-            copy_region.srcOffset = { 0, 0, 0 };
-            copy_region.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-            copy_region.dstOffset = { 0, 0, 0 };
-            copy_region.extent = { m_swap_chain_extent.width, m_swap_chain_extent.height, 1 };
-            vkCmdCopyImage(
-                m_command_buffers[image_index],
-                m_rt_output_image,
-                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                m_swap_chain_images[image_index],
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                1,
-                &copy_region);
-
-            nv_helpers_vk::imageBarrier(
-                m_command_buffers[image_index],
-                m_swap_chain_images[image_index],
-                subresource_range,
-                VK_ACCESS_TRANSFER_WRITE_BIT,
-                0,          // dstAccessMask
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-#endif
-
             vkCmdEndRenderPass(m_command_buffers[image_index]);
 
             if (vkEndCommandBuffer(m_command_buffers[image_index]) != VK_SUCCESS)
@@ -2628,11 +2597,8 @@ class HelloTriangleApplication
         present_info.pResults = nullptr;
 
         result = vkQueuePresentKHR(m_present_queue, &present_info);
-        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_framebuffer_resized)
-        {
-            m_framebuffer_resized = false;
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
             recreate_vk_swap_chain();
-        }
         else if (result != VK_SUCCESS)
             throw std::runtime_error("Failed to present Vulkan swap chain image");
     }
@@ -2681,20 +2647,6 @@ class HelloTriangleApplication
     void recreate_vk_swap_chain()
     {
         std::cout << "Recreating Vulkan swap chain..." << std::endl;
-
-        int window_width, window_height;
-        glfwGetFramebufferSize(m_window, &window_width, &window_height);
-
-        if (window_width == 0 && window_height == 0)
-        {
-            std::cout << "Window is minimized, waiting until it is brought back to the foreground..." << std::endl;
-
-            while (window_width == 0 || window_height == 0)
-            {
-                glfwWaitEvents();
-                glfwGetFramebufferSize(m_window, &window_width, &window_height);
-            }
-        }
 
         vkDeviceWaitIdle(m_device);
 
