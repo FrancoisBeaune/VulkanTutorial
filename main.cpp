@@ -1638,8 +1638,6 @@ class HelloTriangleApplication
     {
         std::cout << "Creating Vulkan uniform buffers..." << std::endl;
 
-        const VkDeviceSize buffer_size = sizeof(UniformBufferObject);
-
         m_uniform_buffers.resize(m_swap_chain_images.size());
         m_uniform_buffers_memory.resize(m_swap_chain_images.size());
 
@@ -1648,7 +1646,7 @@ class HelloTriangleApplication
             vku_create_buffer(
                 m_physical_device,
                 m_device,
-                buffer_size,
+                sizeof(UniformBufferObject),
                 VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                 m_uniform_buffers[i],
