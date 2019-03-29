@@ -2786,10 +2786,16 @@ class HelloTriangleApplication
     }
 };
 
+void glfw_error_callback(int error, const char* description)
+{
+    std::cerr << "GLFW Error: " << description << " (error code " << error << ")" << std::endl;
+}
+
 int main()
 {
     int exit_code = 1;
 
+    glfwSetErrorCallback(glfw_error_callback);
     glfwInit();
 
     try
