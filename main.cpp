@@ -388,14 +388,14 @@ class HelloTriangleApplication
         pick_vk_physical_device();
         create_vk_logical_device();
 
+        create_vk_command_pools();
+
         create_vk_swap_chain();
         create_vk_swap_chain_image_views();
 
         create_vk_render_pass();
         create_vk_descriptor_set_layout();
         create_vk_graphics_pipeline();
-
-        create_vk_command_pools();
 
         create_vk_color_resources();
         create_vk_depth_resources();
@@ -995,6 +995,31 @@ class HelloTriangleApplication
         vkGetSwapchainImagesKHR(m_device, m_swap_chain, &image_count, nullptr);
         m_swap_chain_images.resize(image_count);
         vkGetSwapchainImagesKHR(m_device, m_swap_chain, &image_count, m_swap_chain_images.data());
+
+        // In ray tracing mode, we expect swap chain images to have VK_IMAGE_LAYOUT_PRESENT_SRC_KHR layout.
+        for (VkImage& image : m_swap_chain_images)
+        {
+            VkCommandBuffer command_buffer =
+                vku_begin_single_time_commands(m_device, m_transient_command_pool);
+
+            VkImageSubresourceRange subresource_range;
+            subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            subresource_range.baseMipLevel = 0;
+            subresource_range.levelCount = 1;
+            subresource_range.baseArrayLayer = 0;
+            subresource_range.layerCount = 1;
+
+            nv_helpers_vk::imageBarrier(
+                command_buffer,
+                image,
+                subresource_range,
+                0,          // srcAccessMask
+                VK_ACCESS_SHADER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+            vku_end_single_time_commands(m_device, m_graphics_queue, m_transient_command_pool, command_buffer);
+        }
     }
 
     void create_vk_swap_chain_image_views()
@@ -1056,6 +1081,7 @@ class HelloTriangleApplication
         color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        //color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         color_attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
         VkAttachmentReference color_attachment_ref = {};
