@@ -305,8 +305,8 @@ class HelloTriangleApplication
     VkDeviceMemory                              m_vertex_buffer_memory;
     VkBuffer                                    m_index_buffer;
     VkDeviceMemory                              m_index_buffer_memory;
-    VkBuffer                                    m_material_buffer;
-    VkDeviceMemory                              m_material_buffer_memory;
+    std::vector<VkBuffer>                       m_material_buffers;
+    std::vector<VkDeviceMemory>                 m_material_buffers_memory;
     std::vector<VkBuffer>                       m_uniform_buffers;
     std::vector<VkDeviceMemory>                 m_uniform_buffers_memory;
 
@@ -1131,23 +1131,34 @@ class HelloTriangleApplication
     {
         std::cout << "Creating Vulkan descriptor set layout..." << std::endl;
 
-        VkDescriptorSetLayoutBinding ubo_layout_binding = {};
-        ubo_layout_binding.binding = 0;
-        ubo_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        ubo_layout_binding.descriptorCount = 1;
-        ubo_layout_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-        ubo_layout_binding.pImmutableSamplers = nullptr;
+        // Camera information.
+        VkDescriptorSetLayoutBinding ubo_camera_layout_binding = {};
+        ubo_camera_layout_binding.binding = 0;
+        ubo_camera_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        ubo_camera_layout_binding.descriptorCount = 1;
+        ubo_camera_layout_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        ubo_camera_layout_binding.pImmutableSamplers = nullptr;
 
+        // Materials.
+        VkDescriptorSetLayoutBinding ubo_materials_layout_binding = {};
+        ubo_materials_layout_binding.binding = 1;
+        ubo_materials_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        ubo_materials_layout_binding.descriptorCount = 1;
+        ubo_materials_layout_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;    // TODO: do we need VK_SHADER_STAGE_VERTEX_BIT?
+        ubo_materials_layout_binding.pImmutableSamplers = nullptr;
+
+        // Textures.
         VkDescriptorSetLayoutBinding sampler_layout_binding = {};
-        sampler_layout_binding.binding = 1;
+        sampler_layout_binding.binding = 2;
         sampler_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         sampler_layout_binding.descriptorCount = 1;
         sampler_layout_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         sampler_layout_binding.pImmutableSamplers = nullptr;
 
-        const std::array<VkDescriptorSetLayoutBinding, 2> bindings =
+        const std::array<VkDescriptorSetLayoutBinding, 3> bindings =
         {
-            ubo_layout_binding,
+            ubo_camera_layout_binding,
+            ubo_materials_layout_binding,
             sampler_layout_binding
         };
 
@@ -1592,7 +1603,10 @@ class HelloTriangleApplication
 
     void create_vk_material_buffer()
     {
-        std::cout << "Creating Vulkan material buffer..." << std::endl;
+        std::cout << "Creating Vulkan material buffers..." << std::endl;
+
+        m_material_buffers.resize(m_swap_chain_images.size());
+        m_material_buffers_memory.resize(m_swap_chain_images.size());
 
         const VkDeviceSize buffer_size = sizeof(m_materials[0]) * m_materials.size();
 
@@ -1613,22 +1627,25 @@ class HelloTriangleApplication
             m_materials.data(),
             buffer_size);
 
-        vku_create_buffer(
-            m_physical_device,
-            m_device,
-            buffer_size,
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            m_material_buffer,
-            m_material_buffer_memory);
+        for (std::size_t i = 0; i < m_swap_chain_images.size(); ++i)
+        {
+            vku_create_buffer(
+                m_physical_device,
+                m_device,
+                buffer_size,
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                m_material_buffers[i],
+                m_material_buffers_memory[i]);
 
-        vku_copy_buffer_sync(
-            m_device,
-            m_graphics_queue,
-            m_transient_command_pool,
-            m_material_buffer,
-            staging_buffer,
-            buffer_size);
+            vku_copy_buffer_sync(
+                m_device,
+                m_graphics_queue,
+                m_transient_command_pool,
+                m_material_buffers[i],
+                staging_buffer,
+                buffer_size);
+        }
 
         vkDestroyBuffer(m_device, staging_buffer, nullptr);
         vkFreeMemory(m_device, staging_buffer_memory, nullptr);
@@ -1909,10 +1926,10 @@ class HelloTriangleApplication
         m_rt_descriptor_set_generator.Bind(m_rt_descriptor_set, 0, { descriptor_acceleration_structure_info });
 
         // Bind camera information.
-        // TODO: which uniform buffer to bind? We have one per swap chain image!
+        // TODO: which buffer to bind? We have one per swap chain image!
         VkDescriptorBufferInfo descriptor_camera_info = {};
         descriptor_camera_info.buffer = m_uniform_buffers[0];
-        descriptor_camera_info.range = sizeof(UniformBufferObject);
+        descriptor_camera_info.range = sizeof(UniformBufferObject);     // TODO: what's the difference between specifying the exact size vs. using VK_WHOLE_SIZE?
         m_rt_descriptor_set_generator.Bind(m_rt_descriptor_set, 2, { descriptor_camera_info });
 
         // Bind vertex buffer.
@@ -1928,8 +1945,9 @@ class HelloTriangleApplication
         m_rt_descriptor_set_generator.Bind(m_rt_descriptor_set, 4, { descriptor_index_buffer_info });
 
         // Bind material buffer.
+        // TODO: which buffer to bind? We have one per swap chain image!
         VkDescriptorBufferInfo descriptor_material_buffer_info = {};
-        descriptor_material_buffer_info.buffer = m_material_buffer;
+        descriptor_material_buffer_info.buffer = m_material_buffers[0];
         descriptor_material_buffer_info.range = VK_WHOLE_SIZE;
         m_rt_descriptor_set_generator.Bind(m_rt_descriptor_set, 5, { descriptor_material_buffer_info });
 
@@ -2238,13 +2256,16 @@ class HelloTriangleApplication
 
     void create_vk_descriptor_pool()
     {
-        std::array<VkDescriptorPoolSize, 2> pool_sizes = {};
+        std::array<VkDescriptorPoolSize, 3> pool_sizes;
 
         pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         pool_sizes[0].descriptorCount = static_cast<std::uint32_t>(m_swap_chain_images.size());
 
-        pool_sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        pool_sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         pool_sizes[1].descriptorCount = static_cast<std::uint32_t>(m_swap_chain_images.size());
+
+        pool_sizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        pool_sizes[2].descriptorCount = static_cast<std::uint32_t>(m_swap_chain_images.size());
 
         VkDescriptorPoolCreateInfo create_info = {};
         create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -2273,17 +2294,14 @@ class HelloTriangleApplication
 
         for (std::size_t i = 0; i < m_swap_chain_images.size(); ++i)
         {
-            VkDescriptorBufferInfo buffer_info = {};
-            buffer_info.buffer = m_uniform_buffers[i];
-            buffer_info.offset = 0;
-            buffer_info.range = sizeof(UniformBufferObject);
+            std::array<VkWriteDescriptorSet, 3> descriptor_writes = {};
 
-            VkDescriptorImageInfo image_info = {};
-            image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            image_info.imageView = m_texture_image_view;
-            image_info.sampler = m_texture_sampler;
+            // Camera.
 
-            std::array<VkWriteDescriptorSet, 2> descriptor_writes = {};
+            VkDescriptorBufferInfo camera_buffer_info = {};
+            camera_buffer_info.buffer = m_uniform_buffers[i];
+            camera_buffer_info.offset = 0;
+            camera_buffer_info.range = sizeof(UniformBufferObject);
 
             descriptor_writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptor_writes[0].dstSet = m_descriptor_sets[i];
@@ -2291,15 +2309,37 @@ class HelloTriangleApplication
             descriptor_writes[0].dstArrayElement = 0;
             descriptor_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             descriptor_writes[0].descriptorCount = 1;
-            descriptor_writes[0].pBufferInfo = &buffer_info;
+            descriptor_writes[0].pBufferInfo = &camera_buffer_info;
+
+            // Materials.
+
+            VkDescriptorBufferInfo material_buffer_info = {};
+            material_buffer_info.buffer = m_material_buffers[i];
+            material_buffer_info.offset = 0;
+            material_buffer_info.range = sizeof(m_materials[0]) * m_materials.size();
 
             descriptor_writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptor_writes[1].dstSet = m_descriptor_sets[i];
             descriptor_writes[1].dstBinding = 1;
             descriptor_writes[1].dstArrayElement = 0;
-            descriptor_writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptor_writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             descriptor_writes[1].descriptorCount = 1;
-            descriptor_writes[1].pImageInfo = &image_info;
+            descriptor_writes[1].pBufferInfo = &material_buffer_info;
+
+            // Textures.
+
+            VkDescriptorImageInfo image_info = {};
+            image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            image_info.imageView = m_texture_image_view;
+            image_info.sampler = m_texture_sampler;
+
+            descriptor_writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptor_writes[2].dstSet = m_descriptor_sets[i];
+            descriptor_writes[2].dstBinding = 2;
+            descriptor_writes[2].dstArrayElement = 0;
+            descriptor_writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptor_writes[2].descriptorCount = 1;
+            descriptor_writes[2].pImageInfo = &image_info;
 
             vkUpdateDescriptorSets(
                 m_device,
@@ -2726,6 +2766,9 @@ class HelloTriangleApplication
 
         for (std::size_t i = 0; i < m_swap_chain_images.size(); ++i)
         {
+            vkDestroyBuffer(m_device, m_material_buffers[i], nullptr);
+            vkFreeMemory(m_device, m_material_buffers_memory[i], nullptr);
+
             vkDestroyBuffer(m_device, m_uniform_buffers[i], nullptr);
             vkFreeMemory(m_device, m_uniform_buffers_memory[i], nullptr);
         }
