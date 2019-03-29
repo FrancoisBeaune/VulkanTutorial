@@ -1091,21 +1091,23 @@ class HelloTriangleApplication
         color_resolve_attachment_ref.attachment = 2;
         color_resolve_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // TODO: why not VK_IMAGE_LAYOUT_PRESENT_SRC_KHR?
 
-        VkSubpassDescription subpass = {};
-        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.colorAttachmentCount = 1;
-        subpass.pColorAttachments = &color_attachment_ref;
-        if (CurrentRenderingMode == RenderingMode::Rasterization)
-            subpass.pResolveAttachments = &color_resolve_attachment_ref;
-        subpass.pDepthStencilAttachment = &depth_attachment_ref;
+        std::array<VkSubpassDescription, 1> subpasses = {};
 
-        VkSubpassDependency dependency = {};
-        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-        dependency.dstSubpass = 0;
-        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.srcAccessMask = 0;
-        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        subpasses[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpasses[0].colorAttachmentCount = 1;
+        subpasses[0].pColorAttachments = &color_attachment_ref;
+        if (CurrentRenderingMode == RenderingMode::Rasterization)
+            subpasses[0].pResolveAttachments = &color_resolve_attachment_ref;
+        subpasses[0].pDepthStencilAttachment = &depth_attachment_ref;
+
+        std::array<VkSubpassDependency, 1> dependencies = {};
+
+        dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+        dependencies[0].dstSubpass = 0;
+        dependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependencies[0].srcAccessMask = 0;
+        dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
         const std::array<VkAttachmentDescription, 3> attachments =
         {
@@ -1118,10 +1120,10 @@ class HelloTriangleApplication
         render_pass_create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         render_pass_create_info.attachmentCount = static_cast<std::uint32_t>(attachments.size());
         render_pass_create_info.pAttachments = attachments.data();
-        render_pass_create_info.subpassCount = 1;
-        render_pass_create_info.pSubpasses = &subpass;
-        render_pass_create_info.dependencyCount = 1;
-        render_pass_create_info.pDependencies = &dependency;
+        render_pass_create_info.subpassCount = static_cast<std::uint32_t>(subpasses.size());
+        render_pass_create_info.pSubpasses = subpasses.data();
+        render_pass_create_info.dependencyCount = static_cast<std::uint32_t>(dependencies.size());
+        render_pass_create_info.pDependencies = dependencies.data();
 
         if (vkCreateRenderPass(m_device, &render_pass_create_info, nullptr, &m_render_pass) != VK_SUCCESS)
             throw std::runtime_error("Failed to create Vulkan render pass");
