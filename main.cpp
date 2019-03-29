@@ -1076,6 +1076,7 @@ class HelloTriangleApplication
         depth_attachment_ref.attachment = 1;
         depth_attachment_ref.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+        // TODO: only used in rasterization mode, appears to be incompatible with ray tracing mode?
         VkAttachmentDescription color_resolve_attachment = {};
         color_resolve_attachment.format = m_swap_chain_surface_format;
         color_resolve_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -1094,7 +1095,8 @@ class HelloTriangleApplication
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &color_attachment_ref;
-        subpass.pResolveAttachments = &color_resolve_attachment_ref;
+        if (CurrentRenderingMode == RenderingMode::Rasterization)
+            subpass.pResolveAttachments = &color_resolve_attachment_ref;
         subpass.pDepthStencilAttachment = &depth_attachment_ref;
 
         VkSubpassDependency dependency = {};
