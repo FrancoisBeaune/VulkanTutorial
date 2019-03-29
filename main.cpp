@@ -2798,18 +2798,22 @@ int main()
     glfwSetErrorCallback(glfw_error_callback);
     glfwInit();
 
-    try
+    if (glfwVulkanSupported())
     {
+        try
+        {
 
-        HelloTriangleApplication app;
-        app.run();
+            HelloTriangleApplication app;
+            app.run();
 
-        exit_code = 0;
+            exit_code = 0;
+        }
+        catch (const std::exception& ex)
+        {
+            std::cerr << "Error: " << ex.what() << "." << std::endl;
+        }
     }
-    catch (const std::exception& ex)
-    {
-        std::cerr << "Error: " << ex.what() << "." << std::endl;
-    }
+    else std::cerr << "Vulkan is not supported." << std::endl;
 
     glfwTerminate();
 
