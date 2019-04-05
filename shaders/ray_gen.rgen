@@ -1,10 +1,45 @@
 #version 460
 #extension GL_NV_ray_tracing : require
 
-layout(binding = 0) uniform accelerationStructureNV topLevelAS;
+layout(binding = 0, set = 0) uniform accelerationStructureNV topLevelAS;
 layout(binding = 1, rgba8) uniform image2D image;
+layout(binding = 2, set = 0) uniform UniformBufferObject
+{
+    mat4 model;
+    mat4 view;
+    mat4 proj;
+    mat4 viewInverse;
+    mat4 projInverse;
+} ubo;
+
+layout(location = 0) rayPayloadNV vec3 hitValue;
 
 void main()
 {
-    imageStore(image, ivec2(gl_LaunchIDNV.xy), vec4(0.5, 0.5, 0.5, 1.0));
+    const vec2 pixelCenter = gl_LaunchIDNV.xy + vec2(0.5);
+    const vec2 pixelCenterNDC = vec2(2.0) * pixelCenter / gl_LaunchSizeNV.xy - vec2(1.0);
+
+    const vec4 origin = ubo.viewInverse * vec4(0.0, 0.0, 0.0, 1.0);
+    const vec4 target = ubo.projInverse * vec4(pixelCenterNDC.x, pixelCenterNDC.y, 1.0, 1.0);
+    const vec4 direction = ubo.viewInverse * vec4(normalize(target.xyz), 0.0);
+
+    const uint rayFlags = gl_RayFlagsOpaqueNV;
+    const uint cullMask = 0xFF;
+    const float tMin = 1.0e-4f;
+    const float tMax = 1.0e+4f;
+
+    traceNV(
+        topLevelAS,
+        rayFlags,
+        cullMask,
+        0,          // sbtRecordOffset
+        0,          // sbtRecordStride
+        0,          // missIndex
+        origin.xyz,
+        tMin,
+        direction.xyz,
+        tMax,
+        0);         // payload = hitValue
+
+    imageStore(image, ivec2(gl_LaunchIDNV.xy), vec4(hitValue, 0.0));
 }

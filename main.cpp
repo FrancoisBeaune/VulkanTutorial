@@ -111,86 +111,6 @@ std::string make_version_string(const std::uint32_t version)
     return sstr.str();
 }
 
-struct UniformBufferObject
-{
-    alignas(16) glm::mat4 m_model;
-    alignas(16) glm::mat4 m_view;
-    alignas(16) glm::mat4 m_proj;
-};
-
-struct Vertex
-{
-    glm::vec3 m_position;
-    glm::vec2 m_tex_coords;
-    glm::vec3 m_color;
-
-    static VkVertexInputBindingDescription get_binding_description()
-    {
-        VkVertexInputBindingDescription binding_description = {};
-        binding_description.binding = 0;
-        binding_description.stride = sizeof(Vertex);
-        binding_description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-        return binding_description;
-    }
-
-    static std::array<VkVertexInputAttributeDescription, 3> get_attribute_descriptions()
-    {
-        std::array<VkVertexInputAttributeDescription, 3> attribute_descriptions = {};
-
-        attribute_descriptions[0].binding = 0;
-        attribute_descriptions[0].location = 0;
-        attribute_descriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attribute_descriptions[0].offset = offsetof(Vertex, m_position);
-
-        attribute_descriptions[2].binding = 0;
-        attribute_descriptions[2].location = 1;
-        attribute_descriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
-        attribute_descriptions[2].offset = offsetof(Vertex, m_tex_coords);
-
-        attribute_descriptions[1].binding = 0;
-        attribute_descriptions[1].location = 2;
-        attribute_descriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attribute_descriptions[1].offset = offsetof(Vertex, m_color);
-
-        return attribute_descriptions;
-    }
-
-    bool operator==(const Vertex& rhs) const
-    {
-        return
-            m_position == rhs.m_position &&
-            m_tex_coords == rhs.m_tex_coords &&
-            m_color == rhs.m_color;
-    }
-};
-
-struct Material
-{
-    glm::vec3 m_diffuse;
-};
-
-struct GeometryInstance
-{
-    VkBuffer        m_vertex_buffer;
-    std::uint32_t   m_vertex_count;
-    VkDeviceSize    m_vertex_offset;
-    VkBuffer        m_index_buffer;
-    std::uint32_t   m_index_count;
-    VkDeviceSize    m_index_offset;
-    glm::mat4x4     m_transform;
-};
-
-struct AccelerationStructure
-{
-    VkBuffer                    m_scratch_buffer = VK_NULL_HANDLE;
-    VkDeviceMemory              m_scratch_mem = VK_NULL_HANDLE;
-    VkBuffer                    m_result_buffer = VK_NULL_HANDLE;
-    VkDeviceMemory              m_result_mem = VK_NULL_HANDLE;
-    VkBuffer                    m_instances_buffer = VK_NULL_HANDLE;
-    VkDeviceMemory              m_instances_mem = VK_NULL_HANDLE;
-    VkAccelerationStructureNV   m_structure = VK_NULL_HANDLE;
-};
-
 //
 // Derivation of the 0x9E3779B97F4A7C17u constant:
 //
@@ -220,13 +140,65 @@ std::size_t combine_hashes(
     return h1 ^ (h2 + 0x9E3779B97F4A7C17u + (h1 << 6) + (h1 >> 2));
 }
 
-std::size_t combine_hashes(
-    const std::size_t h1,
-    const std::size_t h2,
-    const std::size_t h3)
+struct UniformBufferObject
 {
-    return combine_hashes(combine_hashes(h1, h2), h3);
-}
+    alignas(16) glm::mat4 m_model;
+    alignas(16) glm::mat4 m_view;
+    alignas(16) glm::mat4 m_proj;
+    alignas(16) glm::mat4 m_view_inverse;
+    alignas(16) glm::mat4 m_proj_inverse;
+};
+
+struct Vertex
+{
+    glm::vec3       m_position;
+    glm::vec3       m_normal;
+    glm::vec2       m_tex_coords;
+    std::uint32_t   m_material_index;
+    glm::vec3       m_color;
+
+    static std::array<VkVertexInputAttributeDescription, 5> get_attribute_descriptions()
+    {
+        std::array<VkVertexInputAttributeDescription, 5> attribute_descriptions = {};
+
+        attribute_descriptions[0].binding = 0;
+        attribute_descriptions[0].location = 0;
+        attribute_descriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attribute_descriptions[0].offset = offsetof(Vertex, m_position);
+
+        attribute_descriptions[1].binding = 0;
+        attribute_descriptions[1].location = 1;
+        attribute_descriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attribute_descriptions[1].offset = offsetof(Vertex, m_normal);
+
+        attribute_descriptions[2].binding = 0;
+        attribute_descriptions[2].location = 2;
+        attribute_descriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+        attribute_descriptions[2].offset = offsetof(Vertex, m_tex_coords);
+
+        attribute_descriptions[3].binding = 0;
+        attribute_descriptions[3].location = 3;
+        attribute_descriptions[3].format = VK_FORMAT_R32_UINT;
+        attribute_descriptions[3].offset = offsetof(Vertex, m_material_index);
+
+        attribute_descriptions[4].binding = 0;
+        attribute_descriptions[4].location = 4;
+        attribute_descriptions[4].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attribute_descriptions[4].offset = offsetof(Vertex, m_color);
+
+        return attribute_descriptions;
+    }
+
+    bool operator==(const Vertex& rhs) const
+    {
+        return
+            m_position == rhs.m_position &&
+            m_normal == rhs.m_normal &&
+            m_tex_coords == rhs.m_tex_coords &&
+            m_material_index == rhs.m_material_index &&
+            m_color == rhs.m_color;
+    }
+};
 
 namespace std
 {
@@ -235,14 +207,43 @@ namespace std
     {
         size_t operator()(const Vertex& vertex) const
         {
-            return
-                combine_hashes(
-                    hash<glm::vec3>()(vertex.m_position),
-                    hash<glm::vec2>()(vertex.m_tex_coords),
-                    hash<glm::vec3>()(vertex.m_color));
+            size_t result = 0;
+            result = combine_hashes(result, hash<glm::vec3>()(vertex.m_position));
+            result = combine_hashes(result, hash<glm::vec3>()(vertex.m_normal));
+            result = combine_hashes(result, hash<glm::vec2>()(vertex.m_tex_coords));
+            result = combine_hashes(result, hash<std::uint32_t>()(vertex.m_material_index));
+            result = combine_hashes(result, hash<glm::vec3>()(vertex.m_color));
+            return result;
         }
     };
 }
+
+struct Material
+{
+    glm::vec3 m_diffuse;
+};
+
+struct GeometryInstance
+{
+    VkBuffer        m_vertex_buffer;
+    std::uint32_t   m_vertex_count;
+    VkDeviceSize    m_vertex_offset;
+    VkBuffer        m_index_buffer;
+    std::uint32_t   m_index_count;
+    VkDeviceSize    m_index_offset;
+    glm::mat4x4     m_transform;
+};
+
+struct AccelerationStructure
+{
+    VkBuffer                    m_scratch_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory              m_scratch_mem = VK_NULL_HANDLE;
+    VkBuffer                    m_result_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory              m_result_mem = VK_NULL_HANDLE;
+    VkBuffer                    m_instances_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory              m_instances_mem = VK_NULL_HANDLE;
+    VkAccelerationStructureNV   m_structure = VK_NULL_HANDLE;
+};
 
 class HelloTriangleApplication
 {
@@ -1227,7 +1228,11 @@ class HelloTriangleApplication
             frag_shader_stage_info
         };
 
-        const auto binding_description = Vertex::get_binding_description();
+        VkVertexInputBindingDescription binding_description = {};
+        binding_description.binding = 0;
+        binding_description.stride = sizeof(Vertex);
+        binding_description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
         const auto attribute_descriptions = Vertex::get_attribute_descriptions();
 
         VkPipelineVertexInputStateCreateInfo vertex_input_info = {};
@@ -1510,11 +1515,18 @@ class HelloTriangleApplication
                     attrib.vertices[3 * index.vertex_index + 1],
                     attrib.vertices[3 * index.vertex_index + 2]
                 };
+                vertex.m_normal =
+                {
+                    attrib.normals[3 * index.normal_index + 0],
+                    attrib.normals[3 * index.normal_index + 1],
+                    attrib.normals[3 * index.normal_index + 2]
+                };
                 vertex.m_tex_coords =
                 {
                     attrib.texcoords[2 * index.texcoord_index + 0],
                     1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
                 };
+                vertex.m_material_index = 0;
                 vertex.m_color = { 1.0f, 1.0f, 1.0f };
 
                 std::uint32_t vertex_index;
@@ -1953,13 +1965,6 @@ class HelloTriangleApplication
         descriptor_acceleration_structure_info.pAccelerationStructures = &m_rt_top_level_as.m_structure;
         m_rt_descriptor_set_generator.Bind(m_rt_descriptor_set, 0, { descriptor_acceleration_structure_info });
 
-        // Bind camera information.
-        // TODO: which buffer to bind? We have one per swap chain image!
-        VkDescriptorBufferInfo descriptor_camera_info = {};
-        descriptor_camera_info.buffer = m_uniform_buffers[0];
-        descriptor_camera_info.range = sizeof(UniformBufferObject);     // TODO: what's the difference between specifying the exact size vs. using VK_WHOLE_SIZE?
-        m_rt_descriptor_set_generator.Bind(m_rt_descriptor_set, 2, { descriptor_camera_info });
-
         // Bind vertex buffer.
         VkDescriptorBufferInfo descriptor_vertex_buffer_info = {};
         descriptor_vertex_buffer_info.buffer = m_vertex_buffer;
@@ -1971,13 +1976,6 @@ class HelloTriangleApplication
         descriptor_index_buffer_info.buffer = m_index_buffer;
         descriptor_index_buffer_info.range = VK_WHOLE_SIZE;
         m_rt_descriptor_set_generator.Bind(m_rt_descriptor_set, 4, { descriptor_index_buffer_info });
-
-        // Bind material buffer.
-        // TODO: which buffer to bind? We have one per swap chain image!
-        VkDescriptorBufferInfo descriptor_material_buffer_info = {};
-        descriptor_material_buffer_info.buffer = m_material_buffers[0];
-        descriptor_material_buffer_info.range = VK_WHOLE_SIZE;
-        m_rt_descriptor_set_generator.Bind(m_rt_descriptor_set, 5, { descriptor_material_buffer_info });
 
         // Bind textures.
         VkDescriptorImageInfo descriptor_texture_info = {};
@@ -2579,7 +2577,7 @@ class HelloTriangleApplication
                 VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                 VK_IMAGE_LAYOUT_GENERAL);
 
-            update_vk_rt_render_target(m_swap_chain_image_views[image_index]);
+            update_vk_rt_descriptor_set(image_index);
 
             std::array<VkClearValue, 2> clear_values;
             clear_values[0].color = { 1.0f, 0.0f, 0.0f, 1.0f };
@@ -2692,6 +2690,9 @@ class HelloTriangleApplication
         // Account for GLM being initially designed for OpenGL.
         ubo.m_proj[1][1] *= -1.0f;
 
+        ubo.m_view_inverse = glm::inverse(ubo.m_view);
+        ubo.m_proj_inverse = glm::inverse(ubo.m_proj);
+
         vku_copy_host_to_device(
             m_device,
             m_uniform_buffers_memory[image_index],
@@ -2699,14 +2700,26 @@ class HelloTriangleApplication
             static_cast<VkDeviceSize>(sizeof(ubo)));
     }
 
-    void update_vk_rt_render_target(const VkImageView target_image_view)
+    void update_vk_rt_descriptor_set(const std::uint32_t image_index)
     {
         // Bind target image.
         VkDescriptorImageInfo descriptor_output_image_info = {};
         descriptor_output_image_info.sampler = nullptr;
-        descriptor_output_image_info.imageView = target_image_view;
+        descriptor_output_image_info.imageView = m_swap_chain_image_views[image_index];
         descriptor_output_image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
         m_rt_descriptor_set_generator.Bind(m_rt_descriptor_set, 1, { descriptor_output_image_info });
+
+        // Bind camera information.
+        VkDescriptorBufferInfo descriptor_camera_info = {};
+        descriptor_camera_info.buffer = m_uniform_buffers[image_index];
+        descriptor_camera_info.range = sizeof(UniformBufferObject);     // TODO: what's the difference between specifying the exact size vs. using VK_WHOLE_SIZE?
+        m_rt_descriptor_set_generator.Bind(m_rt_descriptor_set, 2, { descriptor_camera_info });
+
+        // Bind material buffer.
+        VkDescriptorBufferInfo descriptor_material_buffer_info = {};
+        descriptor_material_buffer_info.buffer = m_material_buffers[image_index];
+        descriptor_material_buffer_info.range = VK_WHOLE_SIZE;
+        m_rt_descriptor_set_generator.Bind(m_rt_descriptor_set, 5, { descriptor_material_buffer_info });
 
         // Copy bound resource handles into descriptor set.
         m_rt_descriptor_set_generator.UpdateSetContents(m_device, m_rt_descriptor_set);
