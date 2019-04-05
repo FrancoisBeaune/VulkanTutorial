@@ -284,8 +284,8 @@ class HelloTriangleApplication
 
     VkRenderPass                                m_render_pass;
     VkDescriptorSetLayout                       m_descriptor_set_layout;
-    VkPipelineLayout                            m_graphics_pipeline_layout;
-    VkPipeline                                  m_graphics_pipeline;
+    VkPipelineLayout                            m_rasterization_pipeline_layout;
+    VkPipeline                                  m_rasterization_pipeline;
 
     VkCommandPool                               m_command_pool;
     VkCommandPool                               m_transient_command_pool;
@@ -323,6 +323,8 @@ class HelloTriangleApplication
     std::uint32_t                               m_rt_ray_gen_index;
     std::uint32_t                               m_rt_ray_miss_index;
     std::uint32_t                               m_rt_hit_group_index;
+    std::uint32_t                               m_rt_shadow_ray_miss_index;
+    std::uint32_t                               m_rt_shadow_ray_hit_group_index;
     nv_helpers_vk::ShaderBindingTableGenerator  m_rt_sbt_generator;
     VkBuffer                                    m_rt_shader_binding_table_buffer;
     VkDeviceMemory                              m_rt_shader_binding_table_buffer_memory;
@@ -354,7 +356,7 @@ class HelloTriangleApplication
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-        m_window = glfwCreateWindow(WindowWidth, WindowHeight, "Vulkan Tutorial", nullptr, nullptr);
+        m_window = glfwCreateWindow(WindowWidth, WindowHeight, "Vulkan Ray Tracing", nullptr, nullptr);
         glfwGetFramebufferSize(m_window, &m_window_width, &m_window_height);
 
         glfwSetWindowUserPointer(m_window, this);
@@ -396,7 +398,7 @@ class HelloTriangleApplication
 
         create_vk_render_pass();
         create_vk_descriptor_set_layout();
-        create_vk_graphics_pipeline();
+        create_vk_rasterization_pipeline();
 
         create_vk_color_resources();
         create_vk_depth_resources();
@@ -1200,9 +1202,9 @@ class HelloTriangleApplication
             throw std::runtime_error("Failed to create Vulkan descriptor set layout");
     }
 
-    void create_vk_graphics_pipeline()
+    void create_vk_rasterization_pipeline()
     {
-        std::cout << "Creating Vulkan graphics pipeline..." << std::endl;
+        std::cout << "Creating Vulkan rasterization pipeline..." << std::endl;
 
         const std::vector<char> vert_shader_code = read_file("shaders/basic_vertex_shader.spv");
         const std::vector<char> frag_shader_code = read_file("shaders/basic_fragment_shader.spv");
@@ -1332,8 +1334,8 @@ class HelloTriangleApplication
         pipeline_layout_create_info.pushConstantRangeCount = 0;
         pipeline_layout_create_info.pPushConstantRanges = nullptr;
 
-        if (vkCreatePipelineLayout(m_device, &pipeline_layout_create_info, nullptr, &m_graphics_pipeline_layout) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create Vulkan graphics pipeline layout");
+        if (vkCreatePipelineLayout(m_device, &pipeline_layout_create_info, nullptr, &m_rasterization_pipeline_layout) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create Vulkan rasterization pipeline layout");
 
         VkGraphicsPipelineCreateInfo pipeline_create_info = {};
         pipeline_create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -1347,14 +1349,14 @@ class HelloTriangleApplication
         pipeline_create_info.pDepthStencilState = &depth_stencil;
         pipeline_create_info.pColorBlendState = &color_blending;
         pipeline_create_info.pDynamicState = nullptr;
-        pipeline_create_info.layout = m_graphics_pipeline_layout;
+        pipeline_create_info.layout = m_rasterization_pipeline_layout;
         pipeline_create_info.renderPass = m_render_pass;
         pipeline_create_info.subpass = 0;
         pipeline_create_info.basePipelineHandle = VK_NULL_HANDLE;
         pipeline_create_info.basePipelineIndex = -1;
 
-        if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &m_graphics_pipeline) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create Vulkan graphics pipeline");
+        if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &m_rasterization_pipeline) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create Vulkan rasterization pipeline");
 
         vkDestroyShaderModule(m_device, frag_shader_module, nullptr);
         vkDestroyShaderModule(m_device, vert_shader_module, nullptr);
@@ -1721,7 +1723,13 @@ class HelloTriangleApplication
         m_rt_bottom_level_as = create_vk_rt_bottom_level_as(command_buffer);
 
         nv_helpers_vk::TopLevelASGenerator rt_top_level_as_gen;
-        rt_top_level_as_gen.AddInstance(m_rt_bottom_level_as.m_structure, glm::mat4x4(1.0f), 0, 0);
+
+        const std::uint32_t InstanceIndex = 0;
+        rt_top_level_as_gen.AddInstance(
+            m_rt_bottom_level_as.m_structure,
+            glm::mat4x4(1.0f),
+            InstanceIndex,          // instance ID
+            InstanceIndex * 2);     // hit group index
 
         m_rt_top_level_as.m_structure = rt_top_level_as_gen.CreateAccelerationStructure(m_device, VK_TRUE);
 
@@ -1904,7 +1912,7 @@ class HelloTriangleApplication
             0,
             1,
             VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV,
-            VK_SHADER_STAGE_RAYGEN_BIT_NV);
+            VK_SHADER_STAGE_RAYGEN_BIT_NV | VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV);
 
         // Location 1: ray tracing output image.
         m_rt_descriptor_set_generator.AddBinding(
@@ -1995,22 +2003,28 @@ class HelloTriangleApplication
     {
         std::cout << "Creating Vulkan ray tracing pipeline..." << std::endl;
 
-        const std::vector<char> ray_gen_shader_code = read_file("shaders/ray_gen.spv");
-        const std::vector<char> ray_miss_shader_code = read_file("shaders/ray_miss.spv");
-        const std::vector<char> ray_closest_hit_code = read_file("shaders/ray_closest_hit.spv");
-
-        const VkShaderModule ray_gen_shader_module = create_vk_shader_module(ray_gen_shader_code);
-        const VkShaderModule ray_miss_shader_module = create_vk_shader_module(ray_miss_shader_code);
-        const VkShaderModule ray_closest_hit_module = create_vk_shader_module(ray_closest_hit_code);
-
         nv_helpers_vk::RayTracingPipelineGenerator pipeline_generator;
-        pipeline_generator.SetMaxRecursionDepth(1);
+        pipeline_generator.SetMaxRecursionDepth(2);
 
+        const std::vector<char> ray_gen_shader_code = read_file("shaders/ray_gen.spv");
+        const VkShaderModule ray_gen_shader_module = create_vk_shader_module(ray_gen_shader_code);
         m_rt_ray_gen_index = pipeline_generator.AddRayGenShaderStage(ray_gen_shader_module);
+
+        const std::vector<char> ray_miss_shader_code = read_file("shaders/ray_miss.spv");
+        const VkShaderModule ray_miss_shader_module = create_vk_shader_module(ray_miss_shader_code);
         m_rt_ray_miss_index = pipeline_generator.AddMissShaderStage(ray_miss_shader_module);
 
+        const std::vector<char> ray_closest_hit_code = read_file("shaders/ray_closest_hit.spv");
+        const VkShaderModule ray_closest_hit_module = create_vk_shader_module(ray_closest_hit_code);
         m_rt_hit_group_index = pipeline_generator.StartHitGroup();
         pipeline_generator.AddHitShaderStage(ray_closest_hit_module, VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV);
+        pipeline_generator.EndHitGroup();
+
+        const std::vector<char> shadow_ray_miss_shader_code = read_file("shaders/shadow_ray_miss.spv");
+        const VkShaderModule shadow_ray_miss_shader_module = create_vk_shader_module(shadow_ray_miss_shader_code);
+        m_rt_shadow_ray_miss_index = pipeline_generator.AddMissShaderStage(shadow_ray_miss_shader_module);
+
+        m_rt_shadow_ray_hit_group_index = pipeline_generator.StartHitGroup();
         pipeline_generator.EndHitGroup();
 
         pipeline_generator.Generate(
@@ -2019,6 +2033,7 @@ class HelloTriangleApplication
             &m_rt_pipeline,
             &m_rt_pipeline_layout);
 
+        vkDestroyShaderModule(m_device, shadow_ray_miss_shader_module, nullptr);
         vkDestroyShaderModule(m_device, ray_closest_hit_module, nullptr);
         vkDestroyShaderModule(m_device, ray_miss_shader_module, nullptr);
         vkDestroyShaderModule(m_device, ray_gen_shader_module, nullptr);
@@ -2029,8 +2044,12 @@ class HelloTriangleApplication
         std::cout << "Creating Vulkan ray tracing shader binding table..." << std::endl;
 
         m_rt_sbt_generator.AddRayGenerationProgram(m_rt_ray_gen_index, {});
+
         m_rt_sbt_generator.AddMissProgram(m_rt_ray_miss_index, {});
+        m_rt_sbt_generator.AddMissProgram(m_rt_shadow_ray_miss_index, {});
+
         m_rt_sbt_generator.AddHitGroup(m_rt_hit_group_index, {});
+        m_rt_sbt_generator.AddHitGroup(m_rt_shadow_ray_hit_group_index, {});
 
         const VkDeviceSize sbt_size = m_rt_sbt_generator.ComputeSBTSize(m_phsical_device_rt_props);
 
@@ -2413,7 +2432,7 @@ class HelloTriangleApplication
 
             vkCmdBeginRenderPass(m_command_buffers[i], &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-            vkCmdBindPipeline(m_command_buffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphics_pipeline);
+            vkCmdBindPipeline(m_command_buffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, m_rasterization_pipeline);
 
             const VkBuffer vertex_buffers[] = { m_vertex_buffer };
             const VkDeviceSize offsets[] = { 0 };
@@ -2424,7 +2443,7 @@ class HelloTriangleApplication
             vkCmdBindDescriptorSets(
                 m_command_buffers[i],
                 VK_PIPELINE_BIND_POINT_GRAPHICS,
-                m_graphics_pipeline_layout,
+                m_rasterization_pipeline_layout,
                 0,
                 1,
                 &m_descriptor_sets[i],
@@ -2575,10 +2594,20 @@ class HelloTriangleApplication
             if (vkBeginCommandBuffer(m_command_buffers[image_index], &begin_info) != VK_SUCCESS)
                 throw std::runtime_error("Failed to begin recording Vulkan command buffer");
 
+            //
             // Update top-level acceleration structure.
-            // TODO: test refitting.
+            //
+
             nv_helpers_vk::TopLevelASGenerator rt_top_level_as_gen;
-            rt_top_level_as_gen.AddInstance(m_rt_bottom_level_as.m_structure, m_model_rotation_matrix, 0, 0);
+
+            const std::uint32_t InstanceIndex = 0;
+            rt_top_level_as_gen.AddInstance(
+                m_rt_bottom_level_as.m_structure,
+                m_model_rotation_matrix,
+                InstanceIndex,          // instance ID
+                InstanceIndex * 2);     // hit group index
+
+            // TODO: test refitting.
             rt_top_level_as_gen.Generate(
                 m_device,
                 m_command_buffers[image_index],
@@ -2591,6 +2620,10 @@ class HelloTriangleApplication
                 m_rt_top_level_as.m_instances_mem,
                 false,              // refit
                 m_rt_top_level_as.m_structure);
+
+            //
+            //
+            //
 
             VkImageSubresourceRange subresource_range;
             subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -2765,7 +2798,7 @@ class HelloTriangleApplication
         create_vk_swap_chain_image_views();
 
         create_vk_render_pass();
-        create_vk_graphics_pipeline();
+        create_vk_rasterization_pipeline();
 
         create_vk_color_resources();
         create_vk_depth_resources();
@@ -2795,8 +2828,8 @@ class HelloTriangleApplication
             static_cast<std::uint32_t>(m_command_buffers.size()),
             m_command_buffers.data());
 
-        vkDestroyPipeline(m_device, m_graphics_pipeline, nullptr);
-        vkDestroyPipelineLayout(m_device, m_graphics_pipeline_layout, nullptr);
+        vkDestroyPipeline(m_device, m_rasterization_pipeline, nullptr);
+        vkDestroyPipelineLayout(m_device, m_rasterization_pipeline_layout, nullptr);
         vkDestroyRenderPass(m_device, m_render_pass, nullptr);
 
         for (const VkImageView image_view : m_swap_chain_image_views)

@@ -1,12 +1,15 @@
 #version 460
 #extension GL_NV_ray_tracing : require
-#extension GL_EXT_nonuniform_qualifier : require
 
+// TODO: necessary?
+// #extension GL_EXT_nonuniform_qualifier : require
+
+layout(binding = 0, set = 0) uniform accelerationStructureNV topLevelAS;
 layout(binding = 3, set = 0) buffer Vertices { vec4 v[]; } vertices;
 layout(binding = 4, set = 0) buffer Indices { uint i[]; } indices;
 
-hitAttributeNV vec3 attribs;
 layout(location = 0) rayPayloadInNV vec3 hitValue;
+layout(location = 2) rayPayloadNV bool isShadowed;  // TODO: why not location 1?
 
 struct Vertex
 {
@@ -19,6 +22,8 @@ struct Vertex
 
 // Size of Vertex structure in number of vec4.
 const uint VertexSize = 3;
+
+hitAttributeNV vec3 attribs;
 
 Vertex readVertex(const uint index)
 {
@@ -50,7 +55,22 @@ void main()
     const vec3 normal = normalize(v0.normal * bary.x + v1.normal * bary.y + v2.normal * bary.z);
 
     const vec3 LightVector = normalize(vec3(5.0, 4.0, 3.0));
-    const float dotProduct = max(dot(normal, LightVector), 0.2);
+    const vec3 radiance = vec3(max(dot(normal, LightVector), 0.2));
 
-    hitValue = vec3(dotProduct);
+    const vec3 shadowRayOrigin = gl_WorldRayOriginNV + gl_HitTNV * gl_WorldRayDirectionNV;
+    isShadowed = true;
+    traceNV(
+        topLevelAS,
+        gl_RayFlagsOpaqueNV | gl_RayFlagsTerminateOnFirstHitNV | gl_RayFlagsSkipClosestHitShaderNV,
+        0xFF,           // cullMask
+        1,              // sbtRecordOffset: use second hit group
+        0,              // sbtRecordStride
+        1,              // missIndex: use second miss shader
+        shadowRayOrigin,
+        1.0e-4f,        // Tmin
+        LightVector,
+        1.0e+4f,        // Tmax
+        2);             // payload: isShadowed
+
+    hitValue = isShadowed ? radiance * 0.2 : radiance;
 }

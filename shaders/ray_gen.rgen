@@ -23,23 +23,18 @@ void main()
     const vec4 target = ubo.projInverse * vec4(pixelCenterNDC.x, pixelCenterNDC.y, 1.0, 1.0);
     const vec4 direction = ubo.viewInverse * vec4(normalize(target.xyz), 0.0);
 
-    const uint rayFlags = gl_RayFlagsOpaqueNV;
-    const uint cullMask = 0xFF;
-    const float tMin = 1.0e-4f;
-    const float tMax = 1.0e+4f;
-
     traceNV(
         topLevelAS,
-        rayFlags,
-        cullMask,
-        0,          // sbtRecordOffset
-        0,          // sbtRecordStride
-        0,          // missIndex
+        gl_RayFlagsOpaqueNV,
+        0xFF,           // cullMask
+        0,              // sbtRecordOffset: use first hit group
+        0,              // sbtRecordStride
+        0,              // missIndex: use first miss shader
         origin.xyz,
-        tMin,
+        1.0e-4f,        // Tmin
         direction.xyz,
-        tMax,
-        0);         // payload = hitValue
+        1.0e+4f,        // Tmax
+        0);             // payload: hitValue
 
     imageStore(image, ivec2(gl_LaunchIDNV.xy), vec4(hitValue, 0.0));
 }

@@ -79,5 +79,8 @@
     <GLSLValidate Include="shaders\ray_closest_hit.rchit">
       <Filter>shaders</Filter>
     </GLSLValidate>
+    <GLSLValidate Include="shaders\shadow_ray_miss.rmiss">
+      <Filter>shaders</Filter>
+    </GLSLValidate>
   </ItemGroup>
 </Project>

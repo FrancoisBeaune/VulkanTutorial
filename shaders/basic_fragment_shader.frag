@@ -1,5 +1,7 @@
 #version 460
-#extension GL_ARB_separate_shader_objects : enable
+
+// TODO: necessary?
+// #extension GL_ARB_separate_shader_objects : enable
 
 layout(binding = 2) uniform sampler2D texSampler;
 
