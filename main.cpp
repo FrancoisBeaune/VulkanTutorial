@@ -220,7 +220,7 @@ namespace std
 
 struct Material
 {
-    glm::vec3 m_diffuse;
+    glm::vec3       m_diffuse;
 };
 
 struct GeometryInstance
@@ -313,7 +313,6 @@ class HelloTriangleApplication
 
     // Vulkan Ray Tracing.
     AccelerationStructure                       m_rt_bottom_level_as;
-    nv_helpers_vk::TopLevelASGenerator          m_rt_top_level_as_gen;
     AccelerationStructure                       m_rt_top_level_as;
     nv_helpers_vk::DescriptorSetGenerator       m_rt_descriptor_set_generator;
     VkDescriptorPool                            m_rt_descriptor_pool;
@@ -346,7 +345,8 @@ class HelloTriangleApplication
     std::atomic<bool>                           m_framebuffer_resized = false;
 
     // "Game state".
-    float                                       m_rotation_angle = 0.0f;
+    float                                       m_model_rotation_angle = 0.0f;
+    glm::mat4x4                                 m_model_rotation_matrix;
 
     void create_window()
     {
@@ -1720,13 +1720,15 @@ class HelloTriangleApplication
 
         m_rt_bottom_level_as = create_vk_rt_bottom_level_as(command_buffer);
 
-        m_rt_top_level_as_gen.AddInstance(m_rt_bottom_level_as.m_structure, glm::mat4x4(1.0f), 0, 0);
-        m_rt_top_level_as.m_structure = m_rt_top_level_as_gen.CreateAccelerationStructure(m_device, VK_TRUE);
+        nv_helpers_vk::TopLevelASGenerator rt_top_level_as_gen;
+        rt_top_level_as_gen.AddInstance(m_rt_bottom_level_as.m_structure, glm::mat4x4(1.0f), 0, 0);
+
+        m_rt_top_level_as.m_structure = rt_top_level_as_gen.CreateAccelerationStructure(m_device, VK_TRUE);
 
         VkDeviceSize scratch_size = 0;              // bytes
         VkDeviceSize result_size = 0;               // bytes
         VkDeviceSize instance_descs_size = 0;       // bytes
-        m_rt_top_level_as_gen.ComputeASBufferSizes(
+        rt_top_level_as_gen.ComputeASBufferSizes(
             m_device,
             m_rt_top_level_as.m_structure,
             &scratch_size,
@@ -1763,7 +1765,7 @@ class HelloTriangleApplication
             &m_rt_top_level_as.m_instances_mem,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-        m_rt_top_level_as_gen.Generate(
+        rt_top_level_as_gen.Generate(
             m_device,
             command_buffer,
             m_rt_top_level_as.m_structure,
@@ -1773,7 +1775,8 @@ class HelloTriangleApplication
             m_rt_top_level_as.m_result_mem,
             m_rt_top_level_as.m_instances_buffer,
             m_rt_top_level_as.m_instances_mem,
-            VK_NULL_HANDLE);    // TODO: pass m_rt_top_level_as.m_structure for update only
+            false,              // refit
+            VK_NULL_HANDLE);    // previous acceleration structure
 
         vku_end_single_time_commands(
             m_device,
@@ -2477,11 +2480,11 @@ class HelloTriangleApplication
             {
                 const auto frame_begin_time = std::chrono::high_resolution_clock::now();
 
-                // "Game update".
+                // Update.
                 const float total_elapsed_time = std::chrono::duration<float, std::chrono::seconds::period>(frame_begin_time - game_begin_time).count();
-                m_rotation_angle = total_elapsed_time * glm::radians(20.0f);
+                update(total_elapsed_time);
 
-                // "Game render".
+                // Render.
                 draw_frame(current_frame);
                 current_frame = (current_frame + 1) % MaxFramesInFlight;
 
@@ -2512,6 +2515,17 @@ class HelloTriangleApplication
 
         stop = true;
         render_thread.join();
+    }
+
+    void update(const float total_elapsed_time)
+    {
+        m_model_rotation_angle = total_elapsed_time * glm::radians(20.0f);
+
+        m_model_rotation_matrix =
+            glm::rotate(
+                glm::mat4(1.0f),                // initial transform
+                m_model_rotation_angle,         // angle
+                glm::vec3(0.0f, 1.0f, 0.0f));   // axis
     }
 
     void draw_frame(const std::size_t current_frame)
@@ -2560,6 +2574,23 @@ class HelloTriangleApplication
             begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
             if (vkBeginCommandBuffer(m_command_buffers[image_index], &begin_info) != VK_SUCCESS)
                 throw std::runtime_error("Failed to begin recording Vulkan command buffer");
+
+            // Update top-level acceleration structure.
+            // TODO: test refitting.
+            nv_helpers_vk::TopLevelASGenerator rt_top_level_as_gen;
+            rt_top_level_as_gen.AddInstance(m_rt_bottom_level_as.m_structure, m_model_rotation_matrix, 0, 0);
+            rt_top_level_as_gen.Generate(
+                m_device,
+                m_command_buffers[image_index],
+                m_rt_top_level_as.m_structure,
+                m_rt_top_level_as.m_scratch_buffer,
+                0,
+                m_rt_top_level_as.m_result_buffer,
+                m_rt_top_level_as.m_result_mem,
+                m_rt_top_level_as.m_instances_buffer,
+                m_rt_top_level_as.m_instances_mem,
+                false,              // refit
+                m_rt_top_level_as.m_structure);
 
             VkImageSubresourceRange subresource_range;
             subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -2673,10 +2704,7 @@ class HelloTriangleApplication
     {
         // Note: we're using the Y-up convention.
         UniformBufferObject ubo;
-        ubo.m_model = glm::rotate(
-            glm::mat4(1.0f),                    // initial transform
-            m_rotation_angle,                   // angle
-            glm::vec3(0.0f, 1.0f, 0.0f));       // axis
+        ubo.m_model = m_model_rotation_matrix;
         ubo.m_view = glm::lookAt(
             glm::vec3(2.0f, 1.5f, 2.0f),        // eye
             glm::vec3(0.0f, 0.2f, 0.0f),        // center
